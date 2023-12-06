@@ -1,0 +1,29 @@
+#include "fastdose.cuh"
+#include "argparse.h"
+#include "init.h"
+
+namespace fd = fastdose;
+using namespace example;
+
+int main(int argc, char** argv) {
+    if(argparse(argc, argv))
+        return 0;
+    
+    int deviceIdx = getarg<int>("deviceIdx");
+    cudaSetDevice(deviceIdx);
+
+    fd::DENSITY_h density_h;
+    fd::DENSITY_d density_d;
+    if(densityInit(density_h, density_d)) {
+        std::cerr << "density initialization failure." << std::endl;
+        return 1;
+    }
+    // densityTest(density_h, density_d);
+
+    std::vector<fd::BEAM_h> beams_h;
+    std::vector<fd::BEAM_d> beams_d;
+    if (beamsInit(beams_h, beams_d, density_h)) {
+        std::cerr << "beam initialization failure." << std::endl;
+        return 1;
+    }
+}

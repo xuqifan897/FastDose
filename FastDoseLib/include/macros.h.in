@@ -1,0 +1,26 @@
+#ifndef __CONFIG_H__
+#define __CONFIG_H__
+
+#ifdef __CUDA_ARCH__
+    // use device intrinsics for device execution (faster but less accurate hardware solutions)
+    #define fast_cosf(x)                __cosf(x)
+    #define fast_sinf(x)                __sinf(x)
+    #define fast_sincosf(x, sptr, cptr) __sincosf(x, sptr, cptr)
+    #define fast_powf(x, n)             __powf(x, n)
+    #define fast_sq(x)                  __fmul_rn(x,x)
+#else
+    // fallback to helper_math.h definitions (which auto-fallback to host functions for gcc compiled code)
+    #define fast_cosf(x)                cosf(x)
+    #define fast_sinf(x)                sinf(x)
+    #define fast_sincosf(x, sptr, cptr) sincosf(x, sptr, cptr)
+    #define fast_powf(x, n)             powf(x, n)
+    #define fast_sq(x)                  x*x
+#endif
+
+#ifdef __CUDA_ARCH__
+    #define CUDEV_FXN __host__ __device__
+#else
+    #define CUDEV_FXN
+#endif
+
+#endif
