@@ -5,4 +5,5 @@
 #include "geom.cuh"
 #include "density.cuh"
 #include "spectrum.cuh"
+#include "TermaComp.cuh"
 #endif

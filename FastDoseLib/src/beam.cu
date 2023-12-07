@@ -21,6 +21,10 @@ std::ostream& fd::operator<<(std::ostream& os, const fd::BEAM_h& obj) {
     os << "fmap_size: " << obj.fmap_size << std::endl;
     os << "sad: " << obj.sad << std::endl;
     os << "angles: " << obj.angles << std::endl;
+    os << "long_spacing: " << obj.long_spacing << std::endl;
+    os << "minimum range: " << obj.lim_min << std::endl;
+    os << "maximum range: " << obj.lim_max << std::endl;
+    os << "longitudinal dimension: " << obj.long_dim << std::endl;
     os << "fluence: " << std::endl;
     for (int i=0; i<obj.fmap_size.y; i++) {
         for (int j=0; j<obj.fmap_size.x; j++) {
@@ -37,6 +41,11 @@ void fd::beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d) {
     beam_d.fmap_size = beam_h.fmap_size;
     beam_d.sad = beam_h.sad;
     beam_d.angles = beam_h.angles;
+    beam_d.long_spacing = beam_h.long_spacing;
+    beam_d.lim_min = beam_h.lim_min;
+    beam_d.lim_max = beam_h.lim_max;
+    beam_d.long_dim = beam_h.long_dim;
+
     if (beam_d.fluence) {
         checkCudaErrors(cudaFree(beam_d.fluence));
     }
@@ -45,6 +54,13 @@ void fd::beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d) {
         volume * sizeof(float)));
     checkCudaErrors(cudaMemcpy(beam_d.fluence, beam_h.fluence.data(), 
         volume*sizeof(float), cudaMemcpyHostToDevice));
+
+    int width = beam_d.fmap_size.x;
+    int height = beam_d.fmap_size.y;
+    int depth = beam_d.long_dim;
+    cudaExtent extent = make_cudaExtent(width*sizeof(float), height, depth);
+    checkCudaErrors(cudaMalloc3D(&(beam_d.TermaBEVPitch), extent));
+    checkCudaErrors(cudaMemset3D(beam_d.TermaBEVPitch, 0., extent));
 }
 
 void fd::beam_d2h(BEAM_d& beam_d, BEAM_h& beam_h) {
@@ -86,6 +102,8 @@ void fd::test_beam_io() {
     std::cout << beam_h_new << std::endl;
 }
 
+#define debug_calc_range false
+
 bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
     float2 half_fluence_size{
         this->fmap_size.x * this->beamlet_size.x / 2,
@@ -106,13 +124,17 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
     }
 
     float3 source{0, -this->sad, 0};
-    float3 source = inverseRotateBeamAtOriginRHS(
+    source = inverseRotateBeamAtOriginRHS(
         source, this->angles.x, this->angles.y, this->angles.z);
     source = source + this->isocenter;
 
     float3 bbox_begin = make_float3(density_h.BBoxStart) * density_h.VoxelSize;
     float3 bbox_end = make_float3(density_h.BBoxStart + density_h.BBoxDim) * density_h.VoxelSize;
 
+#if debug_calc_range
+    std::cout << "bbox_begin: " << bbox_begin << std::endl;
+    std::cout << "bbox_end: " << bbox_end << std::endl;
+#endif
     // calculate the ranges
     float _min_dist_ = std::numeric_limits<float>::max();
     float _max_dist_ = std::numeric_limits<float>::min();
@@ -141,6 +163,10 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
                     && FCOMP(intersections[idx],(j+2)%3) >= FCOMP(bbox_begin,(j+2)%3)
                     && FCOMP(intersections[idx],(j+2)%3) <= FCOMP(bbox_end,(j+2)%3)
                 ) {
+
+#if debug_calc_range
+                    std::cout << "Boudary: " << boundary << ", intersection: " << intersections[idx] << std::endl;
+#endif
                     float3 _inter = intersections[idx];
                     // projection length
                     float _length = length(_inter - source) * this->sad / length(boundary);
@@ -151,10 +177,70 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
             }
         }
     }
-
     if (! intersect) {
         std::cerr << "The beam doesn't intersect with the bounding box" << std::endl;
         return 1;
     }
+    this->lim_min = _min_dist_;
+    this->lim_max = _max_dist_;
+    this->long_dim = uint(std::ceil((this->lim_max - this->lim_min) / this->long_spacing));
+
+#if debug_calc_range
+    // for debug purposes
+    std::cout << "source: " << source << std::endl;
+    std::cout << *this << std::endl;
+#endif
+
     return 0;
+}
+
+void fastdose::test_TermaBEVPitch(BEAM_d& beam_d) {
+    // assume beam_d.TermaBEVPitch is allocated
+    int width = beam_d.fmap_size.x;
+    int height = beam_d.fmap_size.y;
+    int depth = beam_d.long_dim;
+    size_t volume = height * width * depth;
+    std::vector<float> h_data(volume);
+    for (int i=0; i<volume; i++) {
+        h_data[i] = rand01();
+    }
+
+    // copy data from host to device
+    cudaExtent extent = make_cudaExtent(width*sizeof(float), height, depth);
+    cudaMemcpy3DParms copyParms = {0};
+    copyParms.srcPtr = make_cudaPitchedPtr(h_data.data(), width*sizeof(float), width, height);
+    copyParms.dstPtr = beam_d.TermaBEVPitch;
+    copyParms.extent = extent;
+    copyParms.kind = cudaMemcpyHostToDevice;
+    checkCudaErrors(cudaMemcpy3D(&copyParms));
+
+    std::cout << "(width, height, depth) = (" << width << ", " << height <<
+        ", " << depth << ")" << std::endl;
+    std::cout << "pitch = " << beam_d.TermaBEVPitch.pitch << "[bytes]" << std::endl;
+
+    // copy data from device to host
+    size_t pitched_volume = depth * height *  beam_d.TermaBEVPitch.pitch / sizeof(float);
+    std::vector<float> sample(pitched_volume);
+    checkCudaErrors(cudaMemcpy(sample.data(), beam_d.TermaBEVPitch.ptr, 
+        pitched_volume*sizeof(float), cudaMemcpyDeviceToHost));
+
+    double absolute_diff = 0.;
+    size_t pitch = beam_d.TermaBEVPitch.pitch / sizeof(float);
+    size_t slicePitch = height * pitch;
+    size_t slice = height * width;
+    for (int i=0; i<depth; i++) {
+        size_t idx_i = i * slice;
+        size_t idx_i_pitched = i * slicePitch;
+        for (int j=0; j<height; j++) {
+            size_t idx_j = idx_i + j * width;
+            size_t idx_j_pitched = idx_i_pitched + j * pitch;
+            for (int k=0; k<width; k++) {
+                size_t idx_k = idx_j + k;
+                size_t idx_k_pitched = idx_j_pitched + k;
+                absolute_diff += abs(sample[idx_k_pitched] - h_data[idx_k]);
+            }
+        }
+    }
+
+    std::cout << "Absolute difference: " << absolute_diff << std::endl;
 }

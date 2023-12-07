@@ -26,4 +26,10 @@ int main(int argc, char** argv) {
         std::cerr << "beam initialization failure." << std::endl;
         return 1;
     }
+
+    fd::SPECTRUM_h spectrum_h;
+    if (specInit(spectrum_h)) {
+        std::cerr << "spectrum initialization failure." << std::endl;
+        return 1;
+    }
 }

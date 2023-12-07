@@ -1,6 +1,6 @@
 #include "init.h"
 #include "argparse.h"
-#include "density.cuh"
+#include "fastdose.cuh"
 
 #include <vector>
 #include <string>
@@ -96,34 +96,36 @@ bool example::beamsInit(
             skipFirst = false;
             continue;
         }
-        beams_h.push_back(fd::BEAM_h());
+        beams_h.emplace_back(fd::BEAM_h());
         auto& last_beam = beams_h.back();
         std::istringstream iss(tableRow);
         iss >> last_beam.angles.x >> last_beam.angles.y >> last_beam.angles.z >> 
         last_beam.sad >> last_beam.isocenter.x >> last_beam.isocenter.y >> 
         last_beam.isocenter.z >> last_beam.beamlet_size.x >> last_beam.beamlet_size.y >>
-        last_beam.fmap_size.x >> last_beam.fmap_size.y;
+        last_beam.fmap_size.x >> last_beam.fmap_size.y >> last_beam.long_spacing;
         int n_beamlets = last_beam.fmap_size.x * last_beam.fmap_size.y;
         last_beam.fluence = std::vector<float>(n_beamlets, 1.);
 
         last_beam.calc_range(density_h);
-
-#if true
-        // for debug purposes
-        break;
-#endif
     }
-    
+
     beams_d.resize(beams_h.size());
-    for (int i=0; i<beams_d.size(); i++)
-        beam_h2d(beams_h[i], beams_d[i]);
+    for (int i=0; i<beams_d.size(); i++) {
+        fd::beam_h2d(beams_h[i], beams_d[i]);
+        #if false
+            // for debug purposes
+            test_TermaBEVPitch(last_beam_d);
+            break;
+        #endif
+    }
 
     return 0;
 }
 
-bool example::specInit(fastdose::SPECTRUM_h& spectrum_h,
-    fastdose::SPECTRUM_d& spectrum_d
-) {
+bool example::specInit(fastdose::SPECTRUM_h& spectrum_h) {
     fs::path spectrum_file(getarg<std::string>("inputFolder"));
     spectrum_file = spectrum_file / std::string("spec_6mv.spec");
+    if(spectrum_h.read_spectrum_file(spectrum_file.string()))
+        return 1;
+    return 0;
 }

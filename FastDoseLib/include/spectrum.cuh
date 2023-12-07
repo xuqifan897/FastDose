@@ -2,6 +2,9 @@
 #define __SPECTRUM_CUH__
 
 #include <vector>
+#include <string>
+
+#define MAX_KERNEL_NUM 24
 
 namespace fastdose {
     class SPECTRUM_h {
@@ -12,12 +15,11 @@ namespace fastdose {
         std::vector<float> mu;
         int nkernels;
 
-        bool read_spectrum_file(const std::string& spectrum_file);
+        bool read_spectrum_file(const std::string& spectrum_file, bool verbose=true);
+        bool bind_spectrum();
     };
 
-    class SPECTRUM_d {
-
-    };
+    void test_spectrum(const SPECTRUM_h& spectrum_h);
 }
 
 #endif
