@@ -20,5 +20,6 @@ target_link_libraries(FastDose PRIVATE)
 set_property(TARGET FastDose
     PROPERTY CUDA_ARCHITECTURES 89)
 
-set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G")
+# set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G")
+set(CMAKE_BUILD_TYPE Release)

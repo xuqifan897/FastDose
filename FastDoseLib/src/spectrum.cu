@@ -11,13 +11,6 @@
 namespace fd = fastdose;
 namespace fs = boost::filesystem;
 
-namespace fastdose{
-    __constant__ float d_energy[MAX_KERNEL_NUM];
-    __constant__ float d_fluence[MAX_KERNEL_NUM];
-    __constant__ float d_mu[MAX_KERNEL_NUM];
-    __constant__ float d_mu_en[MAX_KERNEL_NUM];
-}
-
 bool fd::SPECTRUM_h::read_spectrum_file(const std::string& spectrum_file, bool verbose) {
     std::ifstream f(spectrum_file);
     if (! f) {
@@ -61,29 +54,52 @@ bool fd::SPECTRUM_h::read_spectrum_file(const std::string& spectrum_file, bool v
                 << std::left << std::setw(width) << this->mu[i]
                 <<std::left << std::setw(width) << this->mu_en[i] << std::endl;
         }
+        std::cout << std::endl;
     }
-    return 0;
-}
-
-bool fd::SPECTRUM_h::bind_spectrum() {
-    if (this->nkernels > MAX_KERNEL_NUM) {
-        std::cerr << "The number of kernels included is more than MAX_KERNEL_NUM (" 
-            << MAX_KERNEL_NUM << ")" << std::endl;
-        return 1;
-    }
-    checkCudaErrors(cudaMemcpyToSymbol(d_energy, this->energy.data(), this->nkernels*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_fluence, this->fluence.data(), this->nkernels*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_mu, this->mu.data(), this->nkernels*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_mu_en, this->mu_en.data(), this->nkernels*sizeof(float)));
     return 0;
 }
 
 void fd::test_spectrum(const SPECTRUM_h& spectrum_h) {
-    std::vector<float> energy_sample(spectrum_h.nkernels);
-    std::vector<float> fluence_sample(spectrum_h.nkernels);
-    std::vector<float> mu_sample(spectrum_h.nkernels);
-    std::vector<float> mu_en_sample(spectrum_h.nkernels);
+    int nkernels = spectrum_h.nkernels;
 
-    checkCudaErrors(cudaMemcpy(energy_sample.data(), d_energy, spectrum_h.nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    std::vector<float> energy_sample(nkernels);
+    std::vector<float> fluence_sample(nkernels);
+    std::vector<float> mu_sample(nkernels);
+    std::vector<float> mu_en_sample(nkernels);
 
+    float* energy_sample_d;
+    float* fluence_sample_d;
+    float* mu_sample_d;
+    float* mu_en_sample_d;
+
+    checkCudaErrors(cudaMalloc((void**)&energy_sample_d, nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&fluence_sample_d, nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&mu_sample_d, nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&mu_en_sample_d, nkernels*sizeof(float)));
+
+    dim3 blockSize{MAX_KERNEL_NUM};
+    dim3 gridSize{1};
+    d_test_spectrum<<<gridSize, blockSize>>>(energy_sample_d, nkernels, 0);
+    d_test_spectrum<<<gridSize, blockSize>>>(fluence_sample_d, nkernels, 1);
+    d_test_spectrum<<<gridSize, blockSize>>>(mu_sample_d, nkernels, 2);
+    d_test_spectrum<<<gridSize, blockSize>>>(mu_en_sample_d, nkernels, 3);
+
+    checkCudaErrors(cudaMemcpy(energy_sample.data(), energy_sample_d,
+        nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(fluence_sample.data(), fluence_sample_d,
+        nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(mu_sample.data(), mu_sample_d,
+        nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(mu_en_sample.data(), mu_en_sample_d,
+        nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    
+    double absolute_diff = 0.;
+    for (int i=0; i<nkernels; i++) {
+        absolute_diff += abs(spectrum_h.energy[i] - energy_sample[i]);
+        absolute_diff += abs(spectrum_h.fluence[i] - fluence_sample[i]);
+        absolute_diff += abs(spectrum_h.mu[i] - mu_sample[i]);
+        absolute_diff += abs(spectrum_h.mu_en[i] - mu_en_sample[i]);
+    }
+
+    std::cout << "Absolute difference: " << absolute_diff << std::endl;
 }

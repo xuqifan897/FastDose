@@ -25,6 +25,7 @@ std::ostream& fd::operator<<(std::ostream& os, const fd::BEAM_h& obj) {
     os << "minimum range: " << obj.lim_min << std::endl;
     os << "maximum range: " << obj.lim_max << std::endl;
     os << "longitudinal dimension: " << obj.long_dim << std::endl;
+    os << "source: " << obj.source << std::endl;
     os << "fluence: " << std::endl;
     for (int i=0; i<obj.fmap_size.y; i++) {
         for (int j=0; j<obj.fmap_size.x; j++) {
@@ -45,6 +46,7 @@ void fd::beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d) {
     beam_d.lim_min = beam_h.lim_min;
     beam_d.lim_max = beam_h.lim_max;
     beam_d.long_dim = beam_h.long_dim;
+    beam_d.source = beam_h.source;
 
     if (beam_d.fluence) {
         checkCudaErrors(cudaFree(beam_d.fluence));
@@ -61,6 +63,9 @@ void fd::beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d) {
     cudaExtent extent = make_cudaExtent(width*sizeof(float), height, depth);
     checkCudaErrors(cudaMalloc3D(&(beam_d.TermaBEVPitch), extent));
     checkCudaErrors(cudaMemset3D(beam_d.TermaBEVPitch, 0., extent));
+
+    checkCudaErrors(cudaMalloc3D(&(beam_d.DensityBEVPitch), extent));
+    checkCudaErrors(cudaMemset3D(beam_d.DensityBEVPitch, 0., extent));
 }
 
 void fd::beam_d2h(BEAM_d& beam_d, BEAM_h& beam_h) {
@@ -123,10 +128,11 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
             boundaries[i], this->angles.x, this->angles.y, this->angles.z);
     }
 
-    float3 source{0, -this->sad, 0};
-    source = inverseRotateBeamAtOriginRHS(
-        source, this->angles.x, this->angles.y, this->angles.z);
-    source = source + this->isocenter;
+    float3 source_{0, -this->sad, 0};
+    source_ = inverseRotateBeamAtOriginRHS(
+        source_, this->angles.x, this->angles.y, this->angles.z);
+    source_ = source_ + this->isocenter;
+    this->source = source_;
 
     float3 bbox_begin = make_float3(density_h.BBoxStart) * density_h.VoxelSize;
     float3 bbox_end = make_float3(density_h.BBoxStart + density_h.BBoxDim) * density_h.VoxelSize;
@@ -147,10 +153,10 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
         for (int j=0; j<3; j++) {
             double denom = FCOMP(boundary, j);
             denom = std::signbit(denom) ? denom - eps : denom + eps;  // for numeric stability
-            double alpha1 = ( FCOMP(bbox_begin, j) - FCOMP(source, j) ) / denom;
-            double alpha2 = ( FCOMP(bbox_end, j) - FCOMP(source, j) ) / denom;
-            intersections[2*j] = source + alpha1 * boundary;
-            intersections[2*j+1] = source + alpha2 * boundary;
+            double alpha1 = ( FCOMP(bbox_begin, j) - FCOMP(source_, j) ) / denom;
+            double alpha2 = ( FCOMP(bbox_end, j) - FCOMP(source_, j) ) / denom;
+            intersections[2*j] = source_ + alpha1 * boundary;
+            intersections[2*j+1] = source_ + alpha2 * boundary;
         }
 
         // check for valid intersectin with clac_bbox faces
@@ -169,7 +175,7 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
 #endif
                     float3 _inter = intersections[idx];
                     // projection length
-                    float _length = length(_inter - source) * this->sad / length(boundary);
+                    float _length = length(_inter - source_) * this->sad / length(boundary);
                     _min_dist_ = min(_length, _min_dist_);
                     _max_dist_ = max(_length, _max_dist_);
                     intersect = true;
@@ -187,7 +193,6 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
 
 #if debug_calc_range
     // for debug purposes
-    std::cout << "source: " << source << std::endl;
     std::cout << *this << std::endl;
 #endif
 

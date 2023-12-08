@@ -68,3 +68,18 @@ fd::readTexture3D(float* output, cudaTextureObject_t input, int width, int heigh
 float fd::rand01() {
     return (float)std::rand() / RAND_MAX;
 }
+
+void fd::pitched2contiguous(std::vector<float>& output, 
+    std::vector<float>& pitched_input, int width, 
+    int height, int depth, int pitch
+) {
+    for (int i=0; i<depth; i++) {
+        for (int j=0; j<height; j++) {
+            for (int k=0; k<width; k++) {
+                size_t idx_pitch = k + pitch * (j + i * height);
+                size_t idx_output = k + width * (j + i * height);
+                output[idx_output] = pitched_input[idx_pitch];
+            }
+        }
+    }
+}

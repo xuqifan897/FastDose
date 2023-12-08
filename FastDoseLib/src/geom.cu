@@ -4,7 +4,7 @@
 #include <iostream>
 namespace fd = fastdose;
 
-__host__ __device__ float3 rotateAroundAxisAtOriginRHS(
+float3 fd::rotateAroundAxisAtOriginRHS(
     const float3& p, const float3& r, const float& t
 ) {
     /* derivation
@@ -29,7 +29,7 @@ __host__ __device__ float3 rotateAroundAxisAtOriginRHS(
     return result;
 }
 
-__host__ __device__ float3 rotateBeamAtOriginRHS(
+float3 fd::rotateBeamAtOriginRHS(
     const float3& vec, const float& theta, const float& phi, const float& coll
 ) {
     float sptr, cptr;
@@ -40,7 +40,7 @@ __host__ __device__ float3 rotateBeamAtOriginRHS(
 }
 
 // convert BEV coords to PVCS coords
-__host__ __device__ float3 inverseRotateBeamAtOriginRHS(
+float3 fd::inverseRotateBeamAtOriginRHS(
     const float3& vec, const float& theta, const float& phi, const float& coll
 ) {
     // invert what was done in forward rotation

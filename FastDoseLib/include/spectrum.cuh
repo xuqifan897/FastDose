@@ -20,6 +20,8 @@ namespace fastdose {
     };
 
     void test_spectrum(const SPECTRUM_h& spectrum_h);
+    __global__ void
+    d_test_spectrum(float* output, int width, int idx);
 }
 
 #endif

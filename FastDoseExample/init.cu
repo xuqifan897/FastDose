@@ -127,5 +127,10 @@ bool example::specInit(fastdose::SPECTRUM_h& spectrum_h) {
     spectrum_file = spectrum_file / std::string("spec_6mv.spec");
     if(spectrum_h.read_spectrum_file(spectrum_file.string()))
         return 1;
+    if(spectrum_h.bind_spectrum())
+        return 1;
+#if false
+    fd::test_spectrum(spectrum_h);
+#endif
     return 0;
 }

@@ -35,6 +35,9 @@ namespace fastdose {
     __global__ void
     readTexture3D(float* output, cudaTextureObject_t input,
         int width, int height, int depth);
+    void pitched2contiguous(std::vector<float>& output, 
+        std::vector<float>& pitched_input, int width, 
+        int height, int depth, int pitch);
 }
 
 #endif

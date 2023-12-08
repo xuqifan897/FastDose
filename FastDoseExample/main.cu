@@ -18,7 +18,9 @@ int main(int argc, char** argv) {
         std::cerr << "density initialization failure." << std::endl;
         return 1;
     }
-    // densityTest(density_h, density_d);
+#if false
+    densityTest(density_h, density_d);
+#endif
 
     std::vector<fd::BEAM_h> beams_h;
     std::vector<fd::BEAM_d> beams_d;
@@ -32,4 +34,18 @@ int main(int argc, char** argv) {
         std::cerr << "spectrum initialization failure." << std::endl;
         return 1;
     }
+
+#if false
+    std::string outputFolder = getarg<std::string>("outputFolder");
+    if(fd::test_TermaCompute(beams_d[0], density_d, spectrum_h, outputFolder))
+        return 1;
+#endif
+
+#if true
+    std::string outputFolder = getarg<std::string>("outputFolder");
+//     if(fd::profile_TermaCompute(beams_d, density_d, spectrum_h, outputFolder))
+//         return 1;
+    if (fd::TermaComputeCollective(beams_d, density_d, spectrum_h))
+        return 1;
+#endif
 }

@@ -30,6 +30,7 @@ namespace fastdose {
         float lim_min;
         float lim_max;
         uint long_dim;
+        float3 source;
     };
 
     class BEAM_d {
@@ -48,6 +49,8 @@ namespace fastdose {
                 checkCudaErrors(cudaFree(this->fluence));
             if (this->TermaBEVPitch.ptr != nullptr)
                 checkCudaErrors(cudaFree(this->TermaBEVPitch.ptr));
+            if (this->DensityBEVPitch.ptr != nullptr)
+                checkCudaErrors(cudaFree(this->DensityBEVPitch.ptr));
         }
 
         float3 isocenter;
@@ -61,9 +64,42 @@ namespace fastdose {
         float lim_min;
         float lim_max;
         uint long_dim;
+        float3 source;
 
         cudaPitchedPtr TermaBEVPitch;
+        cudaPitchedPtr DensityBEVPitch;
     };
+
+    class d_BEAM_d {
+        // This variable is to avoid the copy of TermaBEVPitch and fluence. Otherwise the same as above
+        public:
+        d_BEAM_d(const BEAM_d& old):
+            isocenter(old.isocenter),
+            beamlet_size(old.beamlet_size),
+            fmap_size(old.fmap_size),
+            sad(old.sad),
+            angles(old.angles),
+            long_spacing(old.long_spacing),
+
+            lim_min(old.lim_min),
+            lim_max(old.lim_max),
+            long_dim(old.long_dim),
+            source(old.source)
+        {}
+
+        float3 isocenter;
+        float2 beamlet_size;
+        uint2 fmap_size;
+        float sad;
+        float3 angles;
+        float long_spacing;
+
+        float lim_min;
+        float lim_max;
+        uint long_dim;
+        float3 source;
+    };
+
     std::ostream& operator<<(std::ostream& os, const BEAM_h& obj);
     void beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d);
     void beam_d2h(BEAM_d& beam_d, BEAM_h& beam_h);

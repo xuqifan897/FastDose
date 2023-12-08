@@ -91,6 +91,49 @@ def range_check():
     fig.savefig(file)
 
 
+def view_Terma_BEV():
+    file = '/data/qifan/projects/EndtoEnd/results/CCCSBench/TermaBEV.bin'
+    array = np.fromfile(file, dtype=np.float32)
+    fmap_size_x = 16
+    fmap_size_y = 16
+    assert array.size % (fmap_size_x * fmap_size_y) == 0, "the size doesn't match"
+    dim_long = int(array.size / (fmap_size_x * fmap_size_y))
+    shape = (dim_long, fmap_size_y, fmap_size_x)
+    array = np.reshape(array, shape)
+
+    central_long = int(dim_long / 2)
+
+    slice_long = array[:, :, 8]
+    slice_trans = array[central_long, :,:]
+    file_long = './figures/TermaBEVLong.png'
+    file_trans = './figures/TermaBEVTrans.png'
+    plt.imsave(file_long, slice_long)
+    plt.imsave(file_trans, slice_trans)
+
+    file = '/data/qifan/projects/EndtoEnd/results/CCCSBench/DensityBEV.bin'
+    array = np.fromfile(file, dtype=np.float32)
+    array = np.reshape(array, shape)
+    slice_long = array[:, :, 8]
+    slice_trans = array[central_long, :, :]
+    file_long = './figures/DensityBEVLong.png'
+    file_trans = './figures/DensityBEVTrans.png'
+    plt.imsave(file_long, slice_long)
+    plt.imsave(file_trans, slice_trans)
+
+
+def view_Terma_PVCS():
+    file = '/data/qifan/projects/EndtoEnd/results/CCCSBench/TermaPVCS.bin'
+    shape = (103, 103, 103)
+    array = np.fromfile(file, dtype=np.float32)
+    array = np.reshape(array, shape)
+    center_idx = 51
+    slice = array[:, center_idx, :]
+    figureFile = './figures/DensityPVCSSlice.png'
+    plt.imsave(figureFile, slice)
+
+
 if __name__ == '__main__':
-    beamListGen()
+    # beamListGen()
     # range_check()
+    # view_Terma_BEV()
+    view_Terma_PVCS()
