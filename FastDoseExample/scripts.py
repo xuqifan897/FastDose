@@ -10,7 +10,7 @@ def beamListGen():
     order:
     azimuth, zenith, coll, sad | isocenter.x, isocenter.y, isocenter.z | dimension.x, dimension.y
     """
-    nbeams = 100
+    nbeams = 1152
     inputFolder = '/data/qifan/projects/EndtoEnd/results/CCCSclone/tmp'
 
     width = 15
@@ -33,7 +33,10 @@ def beamListGen():
         line_content = ['{:.4f}'.format(a).center(width) for a in line_content]
         line_content = line_content + [str(a).center(width) for a in dimension]
         line_content = line_content + ['{:.4f}'.format(long_spacing).center(width)]
-        line = ''.join(line_content) + '\n'
+        if (i != nbeams-1):
+            line = ''.join(line_content) + '\n'
+        else:
+            line = ''.join(line_content)
         content = content + line
 
     beamlist_file = os.path.join(inputFolder, 'beam_lists.txt')
@@ -128,7 +131,7 @@ def view_Terma_PVCS():
     array = np.reshape(array, shape)
     center_idx = 51
     slice = array[:, center_idx, :]
-    figureFile = './figures/DensityPVCSSlice.png'
+    figureFile = './figures/TermaPVCSSlice.png'
     plt.imsave(figureFile, slice)
 
 

@@ -11,3 +11,7 @@ file(MAKE_DIRECTORY ${BINARY_DIR})
 
 add_subdirectory(FastDoseLib)
 add_subdirectory(FastDoseExample)
+option(ENABLE_KERNELGEN "Include the subdirectory for kernel generation, based on Geant4" ON)
+if (ENABLE_KERNELGEN)
+    add_subdirectory(KernelGen)
+endif()

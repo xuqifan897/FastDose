@@ -4,21 +4,13 @@
 #include "cuda_runtime.h"
 
 namespace fastdose {
-    bool TermaCompute(BEAM_d& beam_d, DENSITY_d& density_d, SPECTRUM_h& spectrum_h, cudaStream_t stream=0);
-
-    __global__ void
-    d_TermaCompute(
-        d_BEAM_d beam_d,
-        float* fluence_map,
-        cudaPitchedPtr TermaBEVPitch,
-        cudaPitchedPtr DenseBEVPitch,
-        cudaTextureObject_t densityTex,
-        float3 voxel_size,
-        int nkern
-    );
-
     bool TermaComputeCollective(
-        std::vector<BEAM_d>& beams,
+        size_t fmap_npixels,
+        size_t n_beams,
+        d_BEAM_d* beams,
+        float** fluence_array,
+        float** TermaBEV_array,
+        float** DensityBEV_array,
         DENSITY_d& density_d,
         SPECTRUM_h& spectrum_h,
         cudaStream_t stream=0
@@ -28,8 +20,8 @@ namespace fastdose {
     d_TermaComputeCollective(
         d_BEAM_d* beams,
         float** fluence_maps,
-        cudaPitchedPtr* TermaBEVPitch_array,
-        cudaPitchedPtr* DenseBEVPitch_array,
+        float** TermaBEV_array,
+        float** DenseBEV_array,
         cudaTextureObject_t densityTex,
         float3 voxel_size,
         int nkern
@@ -52,11 +44,9 @@ namespace fastdose {
         float3 voxel_size
     );
 
-    bool test_TermaCompute(BEAM_d& beam_d, DENSITY_d& density_d, SPECTRUM_h& spectrum_h,
-        const std::string& outputFolder);
-
-    bool profile_TermaCompute(std::vector<BEAM_d>& beams_d,
-        DENSITY_d& density_d, SPECTRUM_h& spectrum, const std::string& outputFolder);
+    bool test_TermaComputeCollective(std::vector<BEAM_d>& beams,
+        DENSITY_d& density_d, SPECTRUM_h& spectrum,
+        const std::string& outputFolder, cudaStream_t stream=0);
 }
 
 #endif

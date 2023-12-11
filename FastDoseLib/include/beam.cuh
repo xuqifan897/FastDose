@@ -39,18 +39,15 @@ namespace fastdose {
             return fluence[y * this->fmap_size.x + x];
         }
 
-        __inline__ __host__ BEAM_d() {
-            this->TermaBEVPitch.ptr = nullptr;
-            this->fluence = nullptr;
-        }
+        __inline__ __host__ BEAM_d(): fluence(nullptr), TermaBEV(nullptr), DensityBEV(nullptr) {}
 
         __inline__ __host__ ~BEAM_d() {
             if (this->fluence != nullptr)
                 checkCudaErrors(cudaFree(this->fluence));
-            if (this->TermaBEVPitch.ptr != nullptr)
-                checkCudaErrors(cudaFree(this->TermaBEVPitch.ptr));
-            if (this->DensityBEVPitch.ptr != nullptr)
-                checkCudaErrors(cudaFree(this->DensityBEVPitch.ptr));
+            if (this->TermaBEV != nullptr)
+                checkCudaErrors(cudaFree(this->TermaBEV));
+            if (this->DensityBEV != nullptr)
+                checkCudaErrors(cudaFree(this->DensityBEV));
         }
 
         float3 isocenter;
@@ -59,15 +56,17 @@ namespace fastdose {
         float sad;
         float3 angles;
         float long_spacing;
-        float* fluence=nullptr;
+        float* fluence;
 
         float lim_min;
         float lim_max;
         uint long_dim;
         float3 source;
 
-        cudaPitchedPtr TermaBEVPitch;
-        cudaPitchedPtr DensityBEVPitch;
+        float* TermaBEV;
+        size_t TermaBEV_pitch;
+        float* DensityBEV;
+        size_t DensityBEV_pitch;
     };
 
     class d_BEAM_d {
@@ -84,7 +83,9 @@ namespace fastdose {
             lim_min(old.lim_min),
             lim_max(old.lim_max),
             long_dim(old.long_dim),
-            source(old.source)
+            source(old.source),
+            TermaBEV_pitch(old.TermaBEV_pitch),
+            DensityBEV_pitch(old.DensityBEV_pitch)
         {}
 
         float3 isocenter;
@@ -98,6 +99,8 @@ namespace fastdose {
         float lim_max;
         uint long_dim;
         float3 source;
+        size_t TermaBEV_pitch;
+        size_t DensityBEV_pitch;
     };
 
     std::ostream& operator<<(std::ostream& os, const BEAM_h& obj);

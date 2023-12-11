@@ -1,5 +1,6 @@
 #include "fastdose.cuh"
 #include "helper_math.cuh"
+#include "device_launch_parameters.h"
 #include <boost/filesystem.hpp>
 #include <fstream>
 namespace fs = boost::filesystem;
@@ -60,7 +61,7 @@ namespace fastdose{
 
 namespace fd = fastdose;
 
-#define DIM1 16
+#define WARP 32
 #define DIM2 8
 #define SUPER_SAMPLING 4 // divide a a step into substeps
 
@@ -91,224 +92,6 @@ fd::d_test_spectrum(float* output, int width, int idx) {
     } else if (idx == 3) {
         output[ii] = d_mu_en[ii];
     }
-}
-
-bool fd::TermaCompute(
-    BEAM_d& beam_d, DENSITY_d& density_d, SPECTRUM_h& spectrum_h, cudaStream_t stream
-) {
-    dim3 blockSize(DIM1, DIM1);
-    dim3 gridSize;
-    gridSize.x = (beam_d.fmap_size.x + blockSize.x - 1) / blockSize.x;
-    gridSize.y = (beam_d.fmap_size.y + blockSize.y - 1) / blockSize.y;
-    d_BEAM_d beam_input(beam_d);
-
-    // for safety
-    if (beam_d.TermaBEVPitch.pitch != beam_d.DensityBEVPitch.pitch) {
-        std::cerr << "The pitch of the density and the terma arrays are not equal." << std::endl;
-        return 1;
-    }
-
-    d_TermaCompute<<<gridSize, blockSize, 0, stream>>>(
-        beam_input,
-        beam_d.fluence,
-        beam_d.TermaBEVPitch,
-        beam_d.DensityBEVPitch,
-        density_d.densityTex,
-        density_d.VoxelSize,
-        spectrum_h.nkernels);
-    return 0;
-}
-
-__global__ void
-fd::d_TermaCompute(
-        d_BEAM_d beam_d,
-        float* fluence_map,
-        cudaPitchedPtr TermaBEVPitch,
-        cudaPitchedPtr DenseBEVPitch,
-        cudaTextureObject_t densityTex,
-        float3 voxel_size,
-        int nkern
-) {
-    int idx_x = threadIdx.x + blockIdx.x * blockDim.x;
-    int idx_y = threadIdx.y + blockIdx.y * blockDim.y;
-    if (idx_x >= beam_d.fmap_size.x || idx_y >= beam_d.fmap_size.y)
-        return;
-
-    int dest_pitch = TermaBEVPitch.pitch / sizeof(float);
-    float* dest_ptr = (float*)TermaBEVPitch.ptr;
-    float* dens_ptr = (float*)DenseBEVPitch.ptr;
-    
-    int fluence_idx = idx_x + idx_y * beam_d.fmap_size.x;
-    float fluence_value = fluence_map[fluence_idx];
-
-    float3 pixel_center_minus_source_BEV {
-        (idx_x + 0.5f - beam_d.fmap_size.x * 0.5f) * beam_d.beamlet_size.x,
-        beam_d.sad,
-        (idx_y + 0.5f - beam_d.fmap_size.y * 0.5f) * beam_d.beamlet_size.y
-    };
-    float3 pixel_center_minus_source_PVCS = d_inverseRotateBeamAtOriginRHS(
-        pixel_center_minus_source_BEV, beam_d.angles.x, beam_d.angles.y, beam_d.angles.z);
-
-    float3 step_size_PVCS = pixel_center_minus_source_PVCS * (beam_d.long_spacing / (beam_d.sad * SUPER_SAMPLING));
-    float step_size_norm = length(step_size_PVCS);  // physical length
-
-    // initialize to starting point
-    float3 coords_PVCS = beam_d.source + pixel_center_minus_source_PVCS * (beam_d.lim_min / beam_d.sad);
-
-    float3 step_size_PVCS_normalized = step_size_PVCS / voxel_size;
-    float3 coords_PVCS_normalized = coords_PVCS / voxel_size;
-
-    double radiological_path_length = 0.;
-    for (int i=0; i<beam_d.long_dim; i++) {
-        float t_sum_avg = 0.;
-        float density_avg = 0.;
-        for (int j=0; j<SUPER_SAMPLING; j++) {
-            coords_PVCS_normalized += step_size_PVCS_normalized;
-            float density = tex3D<float>(densityTex, coords_PVCS_normalized.x, coords_PVCS_normalized.y, coords_PVCS_normalized.z);
-            radiological_path_length += density * step_size_norm;
-            density_avg += density;
-
-            float tsum_local = 0.;
-            for (int e=0; e<nkern; e++) {
-                float this_fluence = d_fluence[e] * fluence_value;
-                float this_energy = d_energy[e];
-                // float this_mu_en = d_mu_en[e];
-                float this_mu = d_mu[e];
-                tsum_local += this_fluence * this_energy * this_mu * 
-                    exp(- this_mu * radiological_path_length);
-            }
-            t_sum_avg += tsum_local;
-        }
-        t_sum_avg /= SUPER_SAMPLING;
-        density_avg /= SUPER_SAMPLING;
-        size_t global_idx = idx_x + dest_pitch * (idx_y + i * beam_d.fmap_size.y);
-        dest_ptr[global_idx] = t_sum_avg;
-        dens_ptr[global_idx] = density_avg;
-    }
-}
-
-
-bool fd::test_TermaCompute(BEAM_d& beam_d, DENSITY_d& density_d, SPECTRUM_h& spectrum_h,
-    const std::string& outputFolder) {
-    TermaCompute(beam_d, density_d, spectrum_h);
-    
-    int width = beam_d.fmap_size.x;
-    int height = beam_d.fmap_size.y;
-    int depth = beam_d.long_dim;
-
-    // copy data from device to host
-    size_t pitch = beam_d.TermaBEVPitch.pitch / sizeof(float);
-    size_t pitched_volume = depth * height *  pitch;
-    std::vector<float> sample(pitched_volume);
-    checkCudaErrors(cudaMemcpy(sample.data(), beam_d.TermaBEVPitch.ptr, 
-        pitched_volume*sizeof(float), cudaMemcpyDeviceToHost));
-    
-    // copy data from pitched memory to contiguous memory
-    size_t output_volume = depth * height * width;
-    std::vector<float> output(output_volume, 0.);
-    pitched2contiguous(output, sample, width, height, depth, pitch);
-
-    fs::path outputFile = fs::path(outputFolder) / std::string("TermaBEV.bin");
-    std::ofstream f(outputFile.string());
-    if (! f) {
-        std::cerr << "Could not open the file: " << outputFile.string() << std::endl;
-        return 1;
-    }
-    f.write((char*)output.data(), output_volume*sizeof(float));
-    f.close();
-
-
-    // write terma to PVCS coords
-    // firstly, create a texture for BEVTerma
-    cudaArray* BEVTermaArray;
-    cudaTextureObject_t BEVTermaTex;
-
-    cudaExtent BEVTermaVolume = make_cudaExtent(
-        beam_d.fmap_size.x, beam_d.fmap_size.y, beam_d.long_dim);
-    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
-    checkCudaErrors(cudaMalloc3DArray(&BEVTermaArray, &channelDesc, BEVTermaVolume));
-
-    cudaMemcpy3DParms copyParams = {0};
-    copyParams.srcPtr = 
-        make_cudaPitchedPtr(output.data(),
-            beam_d.fmap_size.x * sizeof(float),
-            beam_d.fmap_size.x,
-            beam_d.fmap_size.y
-        );
-    copyParams.dstArray = BEVTermaArray;
-    copyParams.extent = BEVTermaVolume;
-    copyParams.kind = cudaMemcpyHostToDevice;
-    checkCudaErrors(cudaMemcpy3D(&copyParams));
-
-    cudaResourceDesc texRes;
-    memset(&texRes, 0, sizeof(cudaResourceDesc));
-    texRes.resType = cudaResourceTypeArray;
-    texRes.res.array.array = BEVTermaArray;
-
-    cudaTextureDesc texDescr;
-    memset(&texDescr, 0, sizeof(cudaTextureDesc));
-    texDescr.normalizedCoords = false;
-    texDescr.filterMode = cudaFilterModeLinear;
-    texDescr.addressMode[0] = cudaAddressModeBorder;
-    texDescr.addressMode[1] = cudaAddressModeBorder;
-    texDescr.addressMode[2] = cudaAddressModeBorder;
-    texDescr.readMode = cudaReadModeElementType;
-    checkCudaErrors(cudaCreateTextureObject(&BEVTermaTex, &texRes, &texDescr, NULL));
-
-    // prepare output
-    cudaPitchedPtr TermaPVCSPiched;
-    cudaExtent PVCSExtent = make_cudaExtent(density_d.VolumeDim.x*sizeof(float),
-        density_d.VolumeDim.y, density_d.VolumeDim.z);
-    checkCudaErrors(cudaMalloc3D(&TermaPVCSPiched, PVCSExtent));
-    checkCudaErrors(cudaMemset3D(TermaPVCSPiched, 0., PVCSExtent));
-
-    BEV2PVCS(
-        beam_d,
-        density_d,
-        TermaPVCSPiched,
-        BEVTermaTex
-    );
-
-    // output Terma PVCS
-    size_t pitched_volume_PVCS = density_d.VolumeDim.y * density_d.VolumeDim.z 
-        * TermaPVCSPiched.pitch / sizeof(float);
-    std::vector<float> TermaPVCSPitched_h(pitched_volume_PVCS);
-    checkCudaErrors(cudaMemcpy(TermaPVCSPitched_h.data(),
-        (void*)TermaPVCSPiched.ptr, pitched_volume_PVCS*sizeof(float), cudaMemcpyDeviceToHost));
-    size_t density_volume = density_d.VolumeDim.x *
-        density_d.VolumeDim.y * density_d.VolumeDim.z;
-    std::vector<float> TermaPVCS_h(density_volume);
-    pitched2contiguous(TermaPVCS_h, TermaPVCSPitched_h, density_d.VolumeDim.x,
-        density_d.VolumeDim.y, density_d.VolumeDim.z, TermaPVCSPiched.pitch/sizeof(float));
-    outputFile = fs::path(outputFolder) / std::string("TermaPVCS.bin");
-    f.open(outputFile.string());
-    if (! f) {
-        std::cerr << "Could not open the file: " << outputFile.string() << std::endl;
-        return 1;
-    }
-    f.write((char*)TermaPVCS_h.data(), density_volume*sizeof(float));
-    f.close();
-
-    // clean up
-    checkCudaErrors(cudaDestroyTextureObject(BEVTermaTex));
-    checkCudaErrors(cudaFreeArray(BEVTermaArray));
-    checkCudaErrors(cudaFree(TermaPVCSPiched.ptr));
-
-
-    // output density
-    checkCudaErrors(cudaMemcpy(sample.data(), beam_d.DensityBEVPitch.ptr,
-        pitched_volume*sizeof(float), cudaMemcpyDeviceToHost));
-    pitched2contiguous(output, sample, width, height, depth, pitch);
-    outputFile = fs::path(outputFolder) / std::string("DensityBEV.bin");
-    f.open(outputFile.string());
-    if (! f) {
-        std::cerr << "Could not open the file: " << outputFile.string() << std::endl;
-        return 1;
-    }
-    f.write((char*)output.data(), output_volume*sizeof(float));
-    f.close();
-
-    return 0;
 }
 
 
@@ -368,199 +151,290 @@ fd::d_BEV2PVCS(
 }
 
 
-bool fd::profile_TermaCompute(
-    std::vector<BEAM_d>& beams_d,
-    DENSITY_d& density_d,
-    SPECTRUM_h& spectrum,
-    const std::string& outputFolder
-) {
-    std::vector<cudaStream_t> streams(beams_d.size());
-    for (int i=0; i<beams_d.size(); i++) {
-        cudaStreamCreate(&streams[i]);
-    }
-
-    for (int i=0; i<beams_d.size(); i++) {
-        if (TermaCompute(
-            beams_d[i],
-            density_d,
-            spectrum,
-            streams[i]
-        ))
-            return 1;
-    }
-
-    for (int i=0; i<beams_d.size(); i++) {
-        cudaStreamSynchronize(streams[i]);
-    }
-    for (int i=0; i<beams_d.size(); i++) {
-        cudaStreamDestroy(streams[i]);
-    }
-    return 0;
-}
-
-
-bool fd::TermaComputeCollective (
-    std::vector<BEAM_d>& beams,
+bool fd::TermaComputeCollective(
+    size_t fmap_npixels,
+    size_t n_beams,
+    d_BEAM_d* beams,
+    float** fluence_array,
+    float** TermaBEV_array,
+    float** DensityBEV_array,
     DENSITY_d& density_d,
     SPECTRUM_h& spectrum_h,
     cudaStream_t stream
 ) {
-    // prepare data
-    std::vector<d_BEAM_d> beams_input;
-    for (int i=0; i<beams.size(); i++) {
-        beams_input.emplace_back(d_BEAM_d(beams[i]));
-    }
-    d_BEAM_d* d_beams_input;
-    checkCudaErrors(cudaMalloc((void**)(&d_beams_input), beams.size()*sizeof(d_BEAM_d)));
-    checkCudaErrors(cudaMemcpy(d_beams_input, beams_input.data(),
-        beams.size()*sizeof(d_BEAM_d), cudaMemcpyHostToDevice));
-    
-
-    std::vector<float*> fluence_maps(beams.size());
-    for (int i=0; i<beams.size(); i++) {
-        fluence_maps[i] = beams[i].fluence;
-    }
-    float** fluence_maps_input;
-    checkCudaErrors(cudaMalloc((void***)&fluence_maps_input, beams.size()*sizeof(float*)));
-    checkCudaErrors(cudaMemcpy(fluence_maps_input, fluence_maps.data(),
-        beams.size()*sizeof(float*), cudaMemcpyHostToDevice));
-
-
-    std::vector<cudaPitchedPtr> TermaBEVPitch_array(beams.size());
-    std::vector<cudaPitchedPtr> DenseBEVPitch_array(beams.size());
-    for (int i=0; i<beams.size(); i++) {
-        TermaBEVPitch_array[i] = beams[i].TermaBEVPitch;
-        DenseBEVPitch_array[i] = beams[i].DensityBEVPitch;
-        if (beams[i].TermaBEVPitch.pitch != beams[i].DensityBEVPitch.pitch) {
-            std::cerr << "The pitches of the BEV Terma array and density "
-                "array are not equal for beam " << i << std::endl;
-            return 1;
-        }
-    }
-    cudaPitchedPtr* TermaBEVPitch_array_input;
-    cudaPitchedPtr* DenseBEVPitch_array_input;
-    checkCudaErrors(cudaMalloc((void**)&TermaBEVPitch_array_input, beams.size()*sizeof(cudaPitchedPtr)));
-    checkCudaErrors(cudaMalloc((void**)&DenseBEVPitch_array_input, beams.size()*sizeof(cudaPitchedPtr)));
-    checkCudaErrors(cudaMemcpy(TermaBEVPitch_array_input, TermaBEVPitch_array.data(),
-        beams.size()*sizeof(cudaPitchedPtr), cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(DenseBEVPitch_array_input, DenseBEVPitch_array.data(),
-        beams.size()*sizeof(cudaPitchedPtr), cudaMemcpyHostToDevice));
-
-    dim3 blockSize{DIM1, DIM1, 1};
-    dim3 gridSize{
-        (beams[0].fmap_size.x + blockSize.x - 1) / blockSize.x,
-        (beams[0].fmap_size.y + blockSize.y - 1) / blockSize.y,
-        static_cast<uint>(beams.size())
-    };
+    dim3 blockSize(((fmap_npixels + WARP - 1) / WARP) * WARP, 1, 1);
+    dim3 gridSize(n_beams, 1, 1);
     d_TermaComputeCollective<<<gridSize, blockSize, 0, stream>>>(
-        d_beams_input,
-        fluence_maps_input,
-        TermaBEVPitch_array_input,
-        DenseBEVPitch_array_input,
+        beams,
+        fluence_array,
+        TermaBEV_array,
+        DensityBEV_array,
         density_d.densityTex,
         density_d.VoxelSize,
         spectrum_h.nkernels
     );
-
-    // check some results.
-    size_t pitched_volume_size = TermaBEVPitch_array[0].pitch / sizeof(float) 
-        * beams[0].fmap_size.y * beams[0].long_dim;
-    std::vector<float> TermaSample(pitched_volume_size, 0.);
-    std::vector<float> DenseSample(pitched_volume_size, 0.);
-    checkCudaErrors(cudaMemcpy(TermaSample.data(), TermaBEVPitch_array[0].ptr,
-        pitched_volume_size*sizeof(float), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(DenseSample.data(), DenseBEVPitch_array[0].ptr,
-        pitched_volume_size*sizeof(float), cudaMemcpyDeviceToHost));
-    double Terma_sum = 0.;
-    double Dense_sum = 0.;
-    for (size_t i=0; i<pitched_volume_size; i++) {
-        Terma_sum += TermaSample[i];
-        Dense_sum += DenseSample[i];
-    }
-    std::cout << "Collective Terma calculation finished. Terma sum: " <<
-        Terma_sum << ", Dense sum: " << Dense_sum << std::endl << std::endl;
-
-
-    // clean up
-    checkCudaErrors(cudaFree(d_beams_input));
-    checkCudaErrors(cudaFree(fluence_maps_input));
-    checkCudaErrors(cudaFree(TermaBEVPitch_array_input));
-    checkCudaErrors(cudaFree(DenseBEVPitch_array_input));
     return 0;
 }
+
 
 __global__ void
 fd::d_TermaComputeCollective(
     d_BEAM_d* beams,
     float** fluence_maps,
-    cudaPitchedPtr* TermaBEVPitch_array,
-    cudaPitchedPtr* DenseBEVPitch_array,
+    float** TermaBEV_array,
+    float** DenseBEV_array,
     cudaTextureObject_t densityTex,
     float3 voxel_size,
     int nkern
 ) {
-    int idx_x = threadIdx.x + blockIdx.x * blockDim.x;
-    int idx_y = threadIdx.y + blockIdx.y * blockDim.y;
-    int idx_z = blockIdx.z;
+    int beam_idx = blockIdx.x;
+    d_BEAM_d beam = beams[beam_idx];
+    float* fluence_map = fluence_maps[beam_idx];
+    float* TermaBEV = TermaBEV_array[beam_idx];
+    float* DenseBEV = DenseBEV_array[beam_idx];
 
-    d_BEAM_d beam_d = beams[idx_z];
-    float* fluence_map = fluence_maps[idx_z];
-    cudaPitchedPtr TermaBEVPitch = TermaBEVPitch_array[idx_z];
-    cudaPitchedPtr DenseBEVPitch = DenseBEVPitch_array[idx_z];
-
-    if (idx_x >= beam_d.fmap_size.x || idx_y >= beam_d.fmap_size.y)
+    int pixel_idx = threadIdx.x;
+    int idx_x = pixel_idx % beam.fmap_size.x;
+    int idx_y = pixel_idx / beam.fmap_size.x;
+    if (idx_y >= beam.fmap_size.y)
         return;
 
-    int dest_pitch = TermaBEVPitch.pitch / sizeof(float);
-    float* dest_ptr = (float*)TermaBEVPitch.ptr;
-    float* dens_ptr = (float*)DenseBEVPitch.ptr;
-    
-    int fluence_idx = idx_x + idx_y * beam_d.fmap_size.x;
-    float fluence_value = fluence_map[fluence_idx];
-
+    float fluence_value = fluence_map[pixel_idx];
     float3 pixel_center_minus_source_BEV {
-        (idx_x + 0.5f - beam_d.fmap_size.x * 0.5f) * beam_d.beamlet_size.x,
-        beam_d.sad,
-        (idx_y + 0.5f - beam_d.fmap_size.y * 0.5f) * beam_d.beamlet_size.y
+        (idx_x + 0.5f - beam.fmap_size.x * 0.5f) * beam.beamlet_size.x,
+        beam.sad,
+        (idx_y + 0.5f - beam.fmap_size.y * 0.5f) * beam.beamlet_size.y
     };
     float3 pixel_center_minus_source_PVCS = d_inverseRotateBeamAtOriginRHS(
-        pixel_center_minus_source_BEV, beam_d.angles.x, beam_d.angles.y, beam_d.angles.z);
-
-    float3 step_size_PVCS = pixel_center_minus_source_PVCS * (beam_d.long_spacing / (beam_d.sad * SUPER_SAMPLING));
-    float step_size_norm = length(step_size_PVCS);  // physical length
+        pixel_center_minus_source_BEV, beam.angles.x, beam.angles.y, beam.angles.z);
+    float3 step_size_PVCS = pixel_center_minus_source_PVCS *
+        (beam.long_spacing / (beam.sad * SUPER_SAMPLING));
+    float step_size_norm = length(step_size_PVCS);   // physical length
 
     // initialize to starting point
-    float3 coords_PVCS = beam_d.source + pixel_center_minus_source_PVCS * (beam_d.lim_min / beam_d.sad);
+    float3 coords_PVCS = beam.source + pixel_center_minus_source_PVCS * (beam.lim_min / beam.sad);
 
     float3 step_size_PVCS_normalized = step_size_PVCS / voxel_size;
     float3 coords_PVCS_normalized = coords_PVCS / voxel_size;
 
-    double radiological_path_length = 0.;
-    for (int i=0; i<beam_d.long_dim; i++) {
-        float t_sum_avg = 0.;
+    float radiological_path_length = 0.f;
+    for (int i=0; i<beam.long_dim; i++) {
+        float terma_avg = 0.;
         float density_avg = 0.;
         #pragma unroll
         for (int j=0; j<SUPER_SAMPLING; j++) {
             coords_PVCS_normalized += step_size_PVCS_normalized;
-            float density = tex3D<float>(densityTex, coords_PVCS_normalized.x, coords_PVCS_normalized.y, coords_PVCS_normalized.z);
+            float density = tex3D<float>(densityTex, coords_PVCS_normalized.x,
+                coords_PVCS_normalized.y, coords_PVCS_normalized.z);
             radiological_path_length += density * step_size_norm;
             density_avg += density;
 
-            float tsum_local = 0.;
+            float terma_local = 0.f;
             for (int e=0; e<nkern; e++) {
                 float this_fluence = d_fluence[e] * fluence_value;
                 float this_energy = d_energy[e];
-                // float this_mu_en = d_mu_en[e];
                 float this_mu = d_mu[e];
-                tsum_local += this_fluence * this_energy * this_mu * 
-                    exp(- this_mu * radiological_path_length);
+                terma_local += this_fluence * this_energy * this_mu *
+                    __expf(- this_mu * radiological_path_length);
             }
-            t_sum_avg += tsum_local;
+            terma_avg += terma_local;
         }
-        t_sum_avg /= SUPER_SAMPLING;
+        terma_avg /= SUPER_SAMPLING;
         density_avg /= SUPER_SAMPLING;
-        size_t global_idx = idx_x + dest_pitch * (idx_y + i * beam_d.fmap_size.y);
-        dest_ptr[global_idx] = t_sum_avg;
-        dens_ptr[global_idx] = density_avg;
+        size_t global_idx = pixel_idx + beam.TermaBEV_pitch * i / sizeof(float);
+        TermaBEV[global_idx] = terma_avg;
+        DenseBEV[global_idx] = density_avg;
     }
+}
+
+
+bool fd::test_TermaComputeCollective(
+    std::vector<BEAM_d>& beams,
+    DENSITY_d& density_d,
+    SPECTRUM_h& spectrum_h,
+    const std::string& outputFolder,
+    cudaStream_t stream
+) {
+    // copy beams
+    std::vector<d_BEAM_d> h_beams;
+    h_beams.reserve(beams.size());
+    for (int i=0; i<beams.size(); i++)
+        h_beams.emplace_back(d_BEAM_d(beams[i]));
+    d_BEAM_d* d_beams = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_beams, beams.size()*sizeof(d_BEAM_d)));
+    checkCudaErrors(cudaMemcpy(d_beams, h_beams.data(),
+        beams.size()*sizeof(d_BEAM_d), cudaMemcpyHostToDevice));
+
+    // copy fluence maps
+    std::vector<float*> h_fluence_array;
+    h_fluence_array.reserve(beams.size());
+    for (int i=0; i<beams.size(); i++)
+        h_fluence_array[i] = beams[i].fluence;
+    float** fluence_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)(&fluence_array), beams.size()*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(fluence_array, h_fluence_array.data(),
+        beams.size()*sizeof(float*), cudaMemcpyHostToDevice));
+    
+    // allocate TermaBEV_array
+    std::vector<float*> h_TermaBEV_array(beams.size(), nullptr);
+    for (int i=0; i<beams.size(); i++)
+        h_TermaBEV_array[i] = beams[i].TermaBEV;
+    float** TermaBEV_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)(&TermaBEV_array), beams.size()*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(TermaBEV_array, h_TermaBEV_array.data(),
+        beams.size()*sizeof(float*), cudaMemcpyHostToDevice));
+    
+    // allocate DenseBEV_array
+    std::vector<float*> h_DensityBEV_array(beams.size(), nullptr);
+    for (int i=0; i<beams.size(); i++)
+        h_DensityBEV_array[i] = beams[i].DensityBEV;
+    float** DenseBEV_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)(&DenseBEV_array), beams.size()*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(DenseBEV_array, h_DensityBEV_array.data(),
+        beams.size()*sizeof(float*), cudaMemcpyHostToDevice));
+
+    size_t fmap_npixels = beams[0].fmap_size.x * beams[0].fmap_size.y;
+
+#if false
+    // output the parameters of all beams
+    for (int i=0; i<beams.size(); i++)
+        std::cout << "beam " << i << ", fluence map dimensions: " << 
+        beams[i].fmap_size << ", longitudinal dimension: " << beams[i].long_dim << std::endl;
+#endif
+
+    // for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
+    TermaComputeCollective(
+        fmap_npixels,
+        beams.size(),
+        d_beams,
+        fluence_array,
+        TermaBEV_array,
+        DenseBEV_array,
+        density_d,
+        spectrum_h,
+        stream
+    );
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0.0f;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    std::cout << "Time elapsed: " << milliseconds << " [ms]"<< std::endl;
+
+    // retrieve result
+    size_t nVoxels = beams[0].fmap_size.x * beams[0].fmap_size.y * beams[0].long_dim;
+    size_t pitch_host = beams[0].fmap_size.x * beams[0].fmap_size.y;
+    std::vector<float> TermaBEV_example(nVoxels, 0.);
+    checkCudaErrors(cudaMemcpy2D(
+        TermaBEV_example.data(), pitch_host*sizeof(float),
+        beams[0].TermaBEV, beams[0].TermaBEV_pitch,
+        pitch_host*sizeof(float), beams[0].long_dim, cudaMemcpyDeviceToHost));
+    
+    std::vector<float> DenseBEV_example(nVoxels, 0.);
+    checkCudaErrors(cudaMemcpy2D(
+        DenseBEV_example.data(), pitch_host*sizeof(float),
+        beams[0].DensityBEV, beams[0].DensityBEV_pitch,
+        pitch_host*sizeof(float), beams[0].long_dim, cudaMemcpyDeviceToHost));
+    
+    fs::path DensityFile = fs::path(outputFolder) / std::string("DensityBEV.bin");
+    std::ofstream f(DensityFile.string());
+    if (! f) {
+        std::cerr << "Could not open file: " << DensityFile.string() << std::endl;
+        return 1;
+    }
+    f.write((char*)(DenseBEV_example.data()), nVoxels*sizeof(float));
+    f.close();
+
+    fs::path TermaFile = fs::path(outputFolder) / std::string("TermaBEV.bin");
+    f.open(TermaFile.string());
+    if (! f) {
+        std::cerr << "Could not open file: " << TermaFile.string() << std::endl;
+        return 1;
+    }
+    f.write((char*)(TermaBEV_example.data()), nVoxels*sizeof(float));
+    f.close();
+    
+    // clean up
+    checkCudaErrors(cudaFree(d_beams));
+    checkCudaErrors(cudaFree(fluence_array));
+    checkCudaErrors(cudaFree(TermaBEV_array));
+    checkCudaErrors(cudaFree(DenseBEV_array));
+
+
+    // transfer BEV to PVCS. Construct texture memory first
+    cudaArray* TermaBEV_Arr;
+    cudaTextureObject_t TermaBEV_Tex;
+    cudaExtent volumeSize = make_cudaExtent(
+        beams[0].fmap_size.x, beams[0].fmap_size.y, beams[0].long_dim);
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+    checkCudaErrors(cudaMalloc3DArray(&TermaBEV_Arr, &channelDesc, volumeSize));
+
+    cudaMemcpy3DParms copyParams = {0};
+    copyParams.srcPtr = 
+        make_cudaPitchedPtr(TermaBEV_example.data(),
+            beams[0].fmap_size.x * sizeof(float),
+            beams[0].fmap_size.x, beams[0].fmap_size.y);
+    copyParams.dstArray = TermaBEV_Arr;
+    copyParams.extent = volumeSize;
+    copyParams.kind = cudaMemcpyHostToDevice;
+    checkCudaErrors(cudaMemcpy3D(&copyParams));
+
+    cudaResourceDesc texRes;
+    memset(&texRes, 0, sizeof(cudaResourceDesc));
+    texRes.resType = cudaResourceTypeArray;
+    texRes.res.array.array = TermaBEV_Arr;
+
+    cudaTextureDesc texDescr;
+    memset(&texDescr, 0, sizeof(cudaTextureDesc));
+    texDescr.normalizedCoords = false;
+    texDescr.filterMode = cudaFilterModeLinear;
+    texDescr.addressMode[0] = cudaAddressModeBorder;
+    texDescr.addressMode[1] = cudaAddressModeBorder;
+    texDescr.addressMode[2] = cudaAddressModeBorder;
+    texDescr.readMode = cudaReadModeElementType;
+    checkCudaErrors(cudaCreateTextureObject(&TermaBEV_Tex, &texRes, &texDescr, NULL));
+
+    // Construct destination array
+    cudaExtent TermaPVCS_Arr_extent = make_cudaExtent(
+        density_d.VolumeDim.x * sizeof(float),
+        density_d.VolumeDim.y, density_d.VolumeDim.z);
+    cudaPitchedPtr TermaPVCS_Arr;
+    checkCudaErrors(cudaMalloc3D(&TermaPVCS_Arr, TermaPVCS_Arr_extent));
+
+    BEV2PVCS(
+        beams[0],
+        density_d,
+        TermaPVCS_Arr,
+        TermaBEV_Tex
+    );
+
+    // write result
+    size_t pitchedVolume = TermaPVCS_Arr.pitch / sizeof(float) * 
+        density_d.VolumeDim.y * density_d.VolumeDim.z;
+    size_t volume = density_d.VolumeDim.x * density_d.VolumeDim.y * 
+        density_d.VolumeDim.z;
+    std::vector<float> TermaPVCS_pitched(pitchedVolume);
+    std::vector<float> TermaPVCS(volume);
+    checkCudaErrors(cudaMemcpy(TermaPVCS_pitched.data(), TermaPVCS_Arr.ptr,
+        pitchedVolume*sizeof(float), cudaMemcpyDeviceToHost));
+    pitched2contiguous(TermaPVCS, TermaPVCS_pitched,
+        density_d.VolumeDim.x, density_d.VolumeDim.y, density_d.VolumeDim.z,
+        TermaPVCS_Arr.pitch / sizeof(float)
+    );
+    fs::path TermaPVCSFile = fs::path(outputFolder) / std::string("TermaPVCS.bin");
+    f.open(TermaPVCSFile.string());
+    if (! f) {
+        std::cerr << "Could not open file " << TermaPVCSFile.string() << std::endl;
+        return 1;
+    }
+    f.write((char*)(TermaPVCS.data()), volume*sizeof(float));
+    f.close();
+
+    return 0;
 }

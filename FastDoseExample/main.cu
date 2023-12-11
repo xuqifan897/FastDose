@@ -35,17 +35,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-#if false
-    std::string outputFolder = getarg<std::string>("outputFolder");
-    if(fd::test_TermaCompute(beams_d[0], density_d, spectrum_h, outputFolder))
-        return 1;
-#endif
-
 #if true
     std::string outputFolder = getarg<std::string>("outputFolder");
-//     if(fd::profile_TermaCompute(beams_d, density_d, spectrum_h, outputFolder))
-//         return 1;
-    if (fd::TermaComputeCollective(beams_d, density_d, spectrum_h))
+    if (fd::test_TermaComputeCollective(beams_d, density_d, spectrum_h, outputFolder))
         return 1;
 #endif
 }

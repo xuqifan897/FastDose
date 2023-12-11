@@ -57,15 +57,30 @@ void fd::beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d) {
     checkCudaErrors(cudaMemcpy(beam_d.fluence, beam_h.fluence.data(), 
         volume*sizeof(float), cudaMemcpyHostToDevice));
 
-    int width = beam_d.fmap_size.x;
-    int height = beam_d.fmap_size.y;
-    int depth = beam_d.long_dim;
-    cudaExtent extent = make_cudaExtent(width*sizeof(float), height, depth);
-    checkCudaErrors(cudaMalloc3D(&(beam_d.TermaBEVPitch), extent));
-    checkCudaErrors(cudaMemset3D(beam_d.TermaBEVPitch, 0., extent));
+    // int width = beam_d.fmap_size.x;
+    // int height = beam_d.fmap_size.y;
+    // int depth = beam_d.long_dim;
+    // cudaExtent extent = make_cudaExtent(width*sizeof(float), height, depth);
+    // checkCudaErrors(cudaMalloc3D(&(beam_d.TermaBEVPitch), extent));
+    // checkCudaErrors(cudaMemset3D(beam_d.TermaBEVPitch, 0., extent));
 
-    checkCudaErrors(cudaMalloc3D(&(beam_d.DensityBEVPitch), extent));
-    checkCudaErrors(cudaMemset3D(beam_d.DensityBEVPitch, 0., extent));
+    // checkCudaErrors(cudaMalloc3D(&(beam_d.DensityBEVPitch), extent));
+    // checkCudaErrors(cudaMemset3D(beam_d.DensityBEVPitch, 0., extent));
+
+    size_t width = beam_d.fmap_size.x * beam_d.fmap_size.y;
+    size_t height = beam_d.long_dim;
+    checkCudaErrors(cudaMallocPitch(
+        &(beam_d.TermaBEV), &(beam_d.TermaBEV_pitch),
+        width*sizeof(float), height));
+    checkCudaErrors(cudaMallocPitch(
+        &(beam_d.DensityBEV), &(beam_d.DensityBEV_pitch),
+        width*sizeof(float), height));
+    checkCudaErrors(cudaMemset2D(
+        beam_d.TermaBEV, beam_d.TermaBEV_pitch, 0.,
+        width*sizeof(float), height));
+    checkCudaErrors(cudaMemset2D(
+        beam_d.DensityBEV, beam_d.DensityBEV_pitch, 0.,
+        width*sizeof(float), height));
 }
 
 void fd::beam_d2h(BEAM_d& beam_d, BEAM_h& beam_h) {
@@ -200,52 +215,24 @@ bool fd::BEAM_h::calc_range(const DENSITY_h& density_h) {
 }
 
 void fastdose::test_TermaBEVPitch(BEAM_d& beam_d) {
-    // assume beam_d.TermaBEVPitch is allocated
-    int width = beam_d.fmap_size.x;
-    int height = beam_d.fmap_size.y;
-    int depth = beam_d.long_dim;
-    size_t volume = height * width * depth;
-    std::vector<float> h_data(volume);
-    for (int i=0; i<volume; i++) {
+    size_t volume = beam_d.fmap_size.x * beam_d.fmap_size.y * beam_d.long_dim;
+    size_t h_pitch = beam_d.fmap_size.x * beam_d.fmap_size.y;
+    std::vector<float> h_data(volume, 0.);
+    for (size_t i=0; i<volume; i++)
         h_data[i] = rand01();
-    }
-
-    // copy data from host to device
-    cudaExtent extent = make_cudaExtent(width*sizeof(float), height, depth);
-    cudaMemcpy3DParms copyParms = {0};
-    copyParms.srcPtr = make_cudaPitchedPtr(h_data.data(), width*sizeof(float), width, height);
-    copyParms.dstPtr = beam_d.TermaBEVPitch;
-    copyParms.extent = extent;
-    copyParms.kind = cudaMemcpyHostToDevice;
-    checkCudaErrors(cudaMemcpy3D(&copyParms));
-
-    std::cout << "(width, height, depth) = (" << width << ", " << height <<
-        ", " << depth << ")" << std::endl;
-    std::cout << "pitch = " << beam_d.TermaBEVPitch.pitch << "[bytes]" << std::endl;
-
-    // copy data from device to host
-    size_t pitched_volume = depth * height *  beam_d.TermaBEVPitch.pitch / sizeof(float);
-    std::vector<float> sample(pitched_volume);
-    checkCudaErrors(cudaMemcpy(sample.data(), beam_d.TermaBEVPitch.ptr, 
-        pitched_volume*sizeof(float), cudaMemcpyDeviceToHost));
-
-    double absolute_diff = 0.;
-    size_t pitch = beam_d.TermaBEVPitch.pitch / sizeof(float);
-    size_t slicePitch = height * pitch;
-    size_t slice = height * width;
-    for (int i=0; i<depth; i++) {
-        size_t idx_i = i * slice;
-        size_t idx_i_pitched = i * slicePitch;
-        for (int j=0; j<height; j++) {
-            size_t idx_j = idx_i + j * width;
-            size_t idx_j_pitched = idx_i_pitched + j * pitch;
-            for (int k=0; k<width; k++) {
-                size_t idx_k = idx_j + k;
-                size_t idx_k_pitched = idx_j_pitched + k;
-                absolute_diff += abs(sample[idx_k_pitched] - h_data[idx_k]);
-            }
-        }
-    }
-
-    std::cout << "Absolute difference: " << absolute_diff << std::endl;
+    checkCudaErrors(cudaMemcpy2D(
+        beam_d.TermaBEV, beam_d.TermaBEV_pitch,
+        h_data.data(), h_pitch*sizeof(float),
+        h_pitch*sizeof(float), beam_d.long_dim,
+        cudaMemcpyHostToDevice));
+    std::vector<float> h_retrieve(volume, 0.);
+    checkCudaErrors(cudaMemcpy2D(
+        h_retrieve.data(), h_pitch*sizeof(float),
+        beam_d.TermaBEV, beam_d.TermaBEV_pitch,
+        h_pitch*sizeof(float), beam_d.long_dim,
+        cudaMemcpyDeviceToHost));
+    double absolute_difference;
+    for (size_t i=0; i<volume; i++)
+        absolute_difference += abs(h_data[i] - h_retrieve[i]);
+    std::cout << "Absolute difference: " << absolute_difference << std::endl;
 }
