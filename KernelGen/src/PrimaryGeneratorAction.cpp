@@ -1,12 +1,15 @@
 #include "G4SystemOfUnits.hh"
 #include "G4ParticleTable.hh"
 #include "G4Event.hh"
+#include "EventInfo.h"
 
 #include "globals.hh"
 #include "PrimaryGeneratorAction.h"
 #include "ArgKernelGen.h"
 #include <atomic>
 #include <iomanip>
+
+#define eps 1e-4f
 
 namespace fd = fastdose;
 
@@ -24,19 +27,22 @@ fd::PrimaryGeneratorAction::PrimaryGeneratorAction() {
     this->fParticleGun->SetParticleDefinition(particle);
     this->fParticleGun->SetParticleMomentum(G4ThreeVector(0.f, 0.f, 1.f));
 
+    // set a dummy energy
+    this->fParticleGun->SetParticleEnergy(6.f * MeV);
+
     int heightDim = getArgKG<int>("heightDim");
-    float heightRes = getArgKG<float>("heightRes");
-    auto sourceOffset = G4ThreeVector(0., 0., -heightDim*heightRes);
+    float heightRes = getArgKG<float>("heightRes") * cm;
+    auto sourceOffset = G4ThreeVector(0., eps, -heightDim*heightRes);
     this->fParticleGun->SetParticlePosition(sourceOffset);
 
     this->EnergyCountTable.resize(spectrum.size());
     float cummu = 0.;
-    int nParticles = getArgKG<int>("nParticles");
+    this->nParticles = getArgKG<int>("nParticles");
     for (int i=0; i<this->EnergyCountTable.size(); i++) {
         cummu += spectrum[i].second;
-        this->EnergyCountTable[i] = static_cast<long>(cummu * nParticles);
+        this->EnergyCountTable[i] = static_cast<long>(cummu * this->nParticles);
     }
-    this->EnergyCountTable.back() = nParticles;
+    this->EnergyCountTable.back() = this->nParticles;
 
     bool expected = false;
     bool new_value = true;
@@ -49,6 +55,8 @@ fd::PrimaryGeneratorAction::PrimaryGeneratorAction() {
             G4cout << std::setw(width) << std::left << spectrum[i].first / MeV
                 << std::setw(width) << std::left << this->EnergyCountTable[i] << G4endl;
     }
+
+    this->logFreq = getArgKG<int>("logFreq");
 }
 
 fd::PrimaryGeneratorAction::~PrimaryGeneratorAction() {
@@ -67,4 +75,8 @@ void fd::PrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
     }
     this->fParticleGun->SetParticleEnergy(energy);
     this->fParticleGun->GeneratePrimaryVertex(anEvent);
+    anEvent->SetUserInformation(new EventInfo());
+
+    if ((particleIdx+1) % this->logFreq == 0)
+        G4cout << "Progress: " << particleIdx+1 << " / " << this->nParticles << G4endl;
 }

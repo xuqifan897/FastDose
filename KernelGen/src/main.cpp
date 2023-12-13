@@ -21,4 +21,11 @@ int main(int argc, char** argv) {
     runManager->SetUserInitialization(new fd::PhysicsList);
 
     runManager->SetUserInitialization(new fd::ActionInitialization);
+
+    runManager->Initialize();
+
+    int nParticles = fd::getArgKG<int>("nParticles");
+    runManager->BeamOn(nParticles);
+
+    delete runManager;
 }

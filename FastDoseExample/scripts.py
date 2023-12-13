@@ -135,8 +135,122 @@ def view_Terma_PVCS():
     plt.imsave(figureFile, slice)
 
 
+def kernelView():
+    """
+    After generating the raw energy deposition tallies,
+    we here we view the dose distribution of the point kernel
+    """
+    kernelFile = '/data/qifan/projects/EndtoEnd/results/CCCSBench/kernel_6mev.bin'
+    marginHead = 100
+    marginTail = 20
+    radiusDim = 100
+    heightRes = 0.1
+    radiusRes = 0.05
+    shape = (marginHead + marginTail, radiusDim)
+    array = np.fromfile(kernelFile, dtype=np.double)
+    array = np.reshape(array,shape)
+
+    # firstly, show longitudinal distribution
+    longitudinal = np.sum(array, axis=1)
+    x_axis = (np.arange(marginHead + marginTail) - marginTail) * heightRes
+    plt.plot(x_axis, longitudinal)
+    plt.xlabel('depth (cm)')
+    plt.ylabel("Energy Deposition (a.u.)")
+    plt.title("Longitudinal energy deposition")
+    plt.show()
+    file = "./figures/KernelLong.png"
+    plt.savefig(file)
+    plt.clf()
+
+    # secondly, we choose several representative slices to view radial dose distribution
+    slices = [30, 40, 60, 80, 100]
+    radius = (np.arange(radiusDim) + 0.5) * radiusRes
+    for i in range(4):
+        sliceIdx = slices[i]
+        slice = array[sliceIdx, :]
+        plt.plot(radius, slice)
+    plt.legend(['depth = 1cm', 'depth = 2cm', 'depth = 4cm', 'depth = 6cm', 'depth = 8cm'])
+    plt.xlabel('radius (cm)')
+    plt.ylabel('energy deposition (a.u.)')
+    plt.title("Radial energy deposition")
+    file = './figures/KernelRadius.png'
+    plt.savefig(file)
+    plt.clf()
+
+
+def cross_validate():
+    """
+    This is to validate the correctness of the kernel calculated above.
+    Previously, we generated a kernel using a Cartesian grid.
+    """
+    cylindricalFile = '/data/qifan/projects/EndtoEnd/results/CCCSBench/kernel_6mev.bin'
+    CartesianFile = '/data/qifan/projects/EndtoEnd/results/Sept1Point/pointKernel/SD.bin'
+
+    CyHead = 100
+    CyTail = 20
+    CyRadial = 100
+    CyHeightRes = 0.1
+    CyRadialRes = 0.05
+
+    CaHead = 50
+    CaTail = 5
+    CaTrans = 50
+    CaRes = 0.1
+
+    ArrayCylinder = np.fromfile(cylindricalFile, dtype=np.double)
+    CyShape = (CyHead+CyTail, CyRadial)
+    ArrayCylinder = np.reshape(ArrayCylinder, CyShape)
+
+    ArrayCartesian = np.fromfile(CartesianFile, dtype=np.double)
+    CaShape = (CaHead+CaTail, CaTrans, CaTrans)
+    ArrayCartesian = np.reshape(ArrayCartesian, CaShape)
+
+    # compare the centerline
+    CyCenter = ArrayCylinder[:, 0].copy()
+    CyCenter /= np.max(CyCenter)
+    CyDepth = (np.arange(CyHead + CyTail) - CyTail) * CyHeightRes
+    plt.plot(CyDepth, CyCenter)
+
+    CaCenterIdx = int(CaTrans / 2)
+    CaCenter = ArrayCartesian[:, CaCenterIdx, CaCenterIdx].copy()
+    CaCenter /= np.max(CaCenter)
+    CaDepth = (np.arange(CaHead + CaTail) - CaTail) * CaRes
+    plt.plot(CaDepth, CaCenter)
+    
+    plt.legend(["Cylindrical", "Cartesian"])
+    plt.xlabel("Depth (cm)")
+    plt.ylabel("Energy deposition (a.u.)")
+    plt.title("Centerline energy deposition")
+    plt.show()
+    file = './figures/CyCaCenter.png'
+    plt.savefig(file)
+    plt.clf()
+
+
+    # compare the partial energy deposition
+    CyPartial = np.sum(ArrayCylinder, axis=1)
+    CyPartial /= np.max(CyPartial)
+
+    CaPartial = np.sum(ArrayCartesian, axis=(1, 2))
+    CaPartial /= np.max(CaPartial)
+
+    plt.plot(CyDepth, CyPartial)
+    plt.plot(CaDepth, CaPartial)
+    plt.legend(["Cylindrical", "Cartesian"])
+    plt.xlabel("Depth (cm)")
+    plt.ylabel("Energy deposition (a.u.)")
+    plt.title("Partial energy deposition")
+    plt.show()
+    file = './figures/CyCaPartial.png'
+    plt.savefig(file)
+    plt.clf()
+
+
+
 if __name__ == '__main__':
     # beamListGen()
     # range_check()
     # view_Terma_BEV()
-    view_Terma_PVCS()
+    # view_Terma_PVCS()
+    # kernelView()
+    cross_validate()

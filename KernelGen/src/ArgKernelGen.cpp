@@ -39,7 +39,9 @@ bool fd::ArgsInitKernelGen(int argc, char** argv) {
     ("marginTail", po::value<int>()->default_value(20),
         "The number of rings in the backward direction to account for backs-scatter.")
     ("marginHead", po::value<int>()->default_value(100),
-        "The number of rings in the forward direction.");
+        "The number of rings in the forward direction.")
+    ("logFreq", po::value<int>()->default_value(100000),
+        "The frequency to print logging information");
     
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);

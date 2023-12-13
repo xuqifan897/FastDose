@@ -16,6 +16,8 @@ namespace fastdose {
     private:
         G4ParticleGun* fParticleGun;
         std::vector<long> EnergyCountTable;
+        int logFreq;
+        long nParticles;
     };
 
     extern std::atomic<long> particleCount;
