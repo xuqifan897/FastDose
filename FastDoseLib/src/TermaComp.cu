@@ -61,7 +61,6 @@ namespace fastdose{
 
 namespace fd = fastdose;
 
-#define WARP 32
 #define DIM2 8
 #define SUPER_SAMPLING 4 // divide a a step into substeps
 
@@ -162,7 +161,7 @@ bool fd::TermaComputeCollective(
     SPECTRUM_h& spectrum_h,
     cudaStream_t stream
 ) {
-    dim3 blockSize(((fmap_npixels + WARP - 1) / WARP) * WARP, 1, 1);
+    dim3 blockSize(((fmap_npixels + WARPSIZE - 1) / WARPSIZE) * WARPSIZE, 1, 1);
     dim3 gridSize(n_beams, 1, 1);
     d_TermaComputeCollective<<<gridSize, blockSize, 0, stream>>>(
         beams,
@@ -267,7 +266,7 @@ bool fd::test_TermaComputeCollective(
 
     // copy fluence maps
     std::vector<float*> h_fluence_array;
-    h_fluence_array.reserve(beams.size());
+    h_fluence_array.resize(beams.size());
     for (int i=0; i<beams.size(); i++)
         h_fluence_array[i] = beams[i].fluence;
     float** fluence_array = nullptr;

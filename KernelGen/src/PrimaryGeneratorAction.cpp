@@ -9,8 +9,6 @@
 #include <atomic>
 #include <iomanip>
 
-#define eps 1e-4f
-
 namespace fd = fastdose;
 
 std::atomic<long> fd::particleCount(0);
@@ -32,7 +30,7 @@ fd::PrimaryGeneratorAction::PrimaryGeneratorAction() {
 
     int heightDim = getArgKG<int>("heightDim");
     float heightRes = getArgKG<float>("heightRes") * cm;
-    auto sourceOffset = G4ThreeVector(0., eps, -heightDim*heightRes);
+    auto sourceOffset = G4ThreeVector(0., 0., -heightDim*heightRes);
     this->fParticleGun->SetParticlePosition(sourceOffset);
 
     this->EnergyCountTable.resize(spectrum.size());

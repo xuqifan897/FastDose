@@ -6,4 +6,6 @@
 #include "density.cuh"
 #include "spectrum.cuh"
 #include "TermaComp.cuh"
+#include "kernel.cuh"
+#include "macros.h"
 #endif

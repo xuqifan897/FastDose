@@ -38,6 +38,7 @@ namespace fastdose {
     void pitched2contiguous(std::vector<float>& output, 
         std::vector<float>& pitched_input, int width, 
         int height, int depth, int pitch);
+    bool showDeviceProperties(int deviceIdx);
 }
 
 #endif

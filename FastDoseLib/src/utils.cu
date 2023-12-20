@@ -83,3 +83,29 @@ void fd::pitched2contiguous(std::vector<float>& output,
         }
     }
 }
+
+
+bool fd::showDeviceProperties(int deviceIdx) {
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, deviceIdx);
+
+    std::cout << "Device " << deviceIdx << ": " << deviceProp.name << std::endl;
+    std::cout << "    Global Memory Size: " << 
+        deviceProp.totalGlobalMem << " bytes" << std::endl;
+    std::cout << "    Shared Memory Size per Block: " << 
+        deviceProp.sharedMemPerBlock << " bytes" << std::endl;
+    std::cout << "    Number of Registers per Block: " <<
+        deviceProp.regsPerBlock << " bytes" << std::endl;
+    std::cout << "    Max Blocks per Multiprocessor: " <<
+        deviceProp.maxBlocksPerMultiProcessor << std::endl;
+    std::cout << "    Maximum resident threads per Multiprocessor: " <<
+        deviceProp.maxThreadsPerMultiProcessor << std::endl;
+    std::cout << "    Shared memory available per Multiprocessor: " << 
+        deviceProp.sharedMemPerMultiprocessor << " bytes" << std::endl;
+    std::cout << "    Number of Threads per Warp: " <<
+        deviceProp.warpSize << std::endl;
+    std::cout << "    Number of SMs in total: " << 
+        deviceProp.multiProcessorCount << std::endl;
+    std::cout << std::endl;
+    return 0;
+}

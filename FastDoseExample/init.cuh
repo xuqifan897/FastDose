@@ -1,5 +1,5 @@
-#ifndef __INIT_H__
-#define __INIT_H__
+#ifndef __INIT_CUH__
+#define __INIT_CUH__
 #include "fastdose.cuh"
 
 namespace example {
@@ -10,6 +10,7 @@ namespace example {
         std::vector<fastdose::BEAM_d>& beams_d,
         fastdose::DENSITY_h& density_h);
     bool specInit(fastdose::SPECTRUM_h& spectrum_h);
+    bool kernelInit(fastdose::KERNEL_h& kernel_h);
 }
 
 #endif

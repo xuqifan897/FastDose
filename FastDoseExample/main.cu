@@ -1,6 +1,6 @@
 #include "fastdose.cuh"
 #include "argparse.h"
-#include "init.h"
+#include "init.cuh"
 
 namespace fd = fastdose;
 using namespace example;
@@ -11,6 +11,13 @@ int main(int argc, char** argv) {
     
     int deviceIdx = getarg<int>("deviceIdx");
     cudaSetDevice(deviceIdx);
+
+    if (fd::showDeviceProperties(deviceIdx)) {
+        std::cerr << "Cannot show device properties." << std::endl;
+        return 1;
+    }
+    fd::test_nextPoint();
+    return 0;
 
     fd::DENSITY_h density_h;
     fd::DENSITY_d density_d;
@@ -35,7 +42,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-#if true
+    fd::KERNEL_h kernel_h;
+    if (kernelInit(kernel_h)) {
+        std::cerr << "kernel initialization failure." << std::endl;
+        return 1;
+    }
+
+#if false
     std::string outputFolder = getarg<std::string>("outputFolder");
     if (fd::test_TermaComputeCollective(beams_d, density_d, spectrum_h, outputFolder))
         return 1;

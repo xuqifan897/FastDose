@@ -67,6 +67,8 @@ namespace fastdose {
         size_t TermaBEV_pitch;
         float* DensityBEV;
         size_t DensityBEV_pitch;
+        float* DoseBEV;
+        size_t DoseBEV_pitch;
     };
 
     class d_BEAM_d {
@@ -104,9 +106,9 @@ namespace fastdose {
     };
 
     std::ostream& operator<<(std::ostream& os, const BEAM_h& obj);
-    void beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d);
+    bool beam_h2d(BEAM_h& beam_h, BEAM_d& beam_d);
     void beam_d2h(BEAM_d& beam_d, BEAM_h& beam_h);
-    void test_beam_io();
+    bool test_beam_io();
     void test_TermaBEVPitch(BEAM_d& beam_d);
 }
 

@@ -10,10 +10,8 @@ bool example::argparse(int argc, char** argv) {
     po::options_description desc("The argument list for the example of fast dose calculation.");
     desc.add_options()
         ("help", "Produce help messages. This program requires the following files in the inputFolder:\n"
-            "1) spec_6mv.spec, which contains the poly-energetic spectrum."
-            "2) convolution_phi_angles.raw, which contains the convolution phi angles for each convolution direction.\n"
-            "3) convolution_theta_angles.raw, which contains the convolution theta angles for each convolution direction.\n"
-            "4) cumulative_kernels.h5, which contains the kernel used in the dose calculation.\n"
+            "1) spec_6mv.spec, which contains the poly-energetic spectrum.\n"
+            "2) kernel_exp_6mv.txt, which contains the CCCS kernels for the poly-energetic beam.\n"
             "5) density.raw, which contains the raw density of the phantom.\n"
             "6) beam_lists.txt, which contains the specifications of the beam information.\n"
             "All the parameters marked as (required) should be specified.\n\n"
@@ -33,16 +31,8 @@ bool example::argparse(int argc, char** argv) {
             "Dose bounding box dimensions (required).")
         
         // dose calculation
-        ("kernelType", po::value<std::string>()->default_value("tabulated"),
-            "Choose between \"tabulated\" and \"exponential\".")
-        ("kernelExtent", po::value<float>()->default_value(4.0),
-            "Dose kernel radius truncate distance, used in tabulated kernel. [cm]")
-        ("nphi", po::value<int>()->default_value(8),
-            "number of phi angles in convolution")
-        ("ntheta", po::value<int>()->default_value(8),
-            "number of theta values in convolution")
-        ("nradii", po::value<int>()->default_value(24),
-            "number of radii values in convolution");
+        ("nPhi", po::value<int>()->default_value(8),
+            "number of phi angles in convolution");
         
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);

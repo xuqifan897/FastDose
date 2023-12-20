@@ -1,7 +1,11 @@
 #include "geom.cuh"
+#include "beam.cuh"
 #include "utils.cuh"
 #include "math_constants.h"
+#include "helper_math.cuh"
+#include "macros.h"
 #include <iostream>
+#include <iomanip>
 namespace fd = fastdose;
 
 float3 fd::rotateAroundAxisAtOriginRHS(
@@ -104,4 +108,102 @@ void fd::test_rotateAroundAxisAtOrigin() {
         std::cout << "The original vector: " << vector << std::endl
             << "result: " << vector_PVCS << std::endl << std::endl;
     }
+}
+
+
+float3 fd::angle2Vector(float theta, float phi) {
+    float sin_theta, cos_theta, sin_phi, cos_phi;
+    fast_sincosf(theta, &sin_theta, &cos_theta);
+    fast_sincosf(phi, &sin_phi, &cos_phi);
+    float3 result{
+        sin_theta * cos_phi,
+        sin_theta * sin_phi,
+        cos_theta};
+    return result;
+}
+
+
+void fd::test_angle2Vector() {
+    int nSamples = 100;
+    std::vector<float2> samples(nSamples);
+    // Specify two special cases
+    samples[0] = make_float2(0.f, 0.f);
+    samples[1] = make_float2(CUDART_PIO4, 0.f);
+    samples[2] = make_float2(CUDART_PI/6, CUDART_PI/6);
+    for (int i=3; i<nSamples; i++) {
+        samples[i] = make_float2 (
+            rand01() * CUDART_PI,
+            rand01() * CUDART_PI * 2
+        );
+    }
+
+    std::vector<float3> results(nSamples);
+    for (int i=0; i<nSamples; i++) {
+        results[i] = angle2Vector(samples[i].x, samples[i].y);
+        std::cout << "theta: " << samples[i].x << ", phi: " << 
+            samples[i].y << ", vector: " << results[i] << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+
+float3 fd::nextPoint(
+    const float3& currentLocation,
+    const float3& direction,
+    bool* flag
+) {
+    float3 stepSize;
+
+    if (direction.x > 0) {
+        stepSize.x = (ceilf(currentLocation.x + eps_fastdose) - currentLocation.x) / direction.x;
+    } else {
+        stepSize.x = (floorf(currentLocation.x - eps_fastdose) - currentLocation.x) / direction.x;
+    }
+
+    if (direction.y > 0) {
+        stepSize.y = (ceilf(currentLocation.y + eps_fastdose) - currentLocation.y) / direction.y;
+    } else {
+        stepSize.y = (floorf(currentLocation.y - eps_fastdose) - currentLocation.y) / direction.y;
+    }
+
+    if (direction.z > 0) {
+        stepSize.z = (ceilf(currentLocation.z + eps_fastdose) - currentLocation.z) / direction.z;
+    } else {
+        stepSize.z = (floorf(currentLocation.z - eps_fastdose) - currentLocation.z) / direction.z;
+    }
+
+    float stepTake = fmin(fmin(stepSize.x, stepSize.y), stepSize.z);
+    *flag = abs(stepTake - stepSize.z) < eps_fastdose;
+    return currentLocation + stepTake * direction;
+}
+
+
+void fd::test_nextPoint() {
+    int nSamples = 100;
+    for (int i=0; i<nSamples; i++) {
+        float3 origin{rand01(), rand01(), rand01()};
+        float3 direction{
+            2 * rand01() - 1,
+            2 * rand01() - 1,
+            2 * rand01() - 1
+        };
+        direction = normalize(direction);
+        bool flag;
+        float3 np = nextPoint(origin, direction, &flag);
+        std::cout << std::setprecision(4) << "origin: " << origin << ", next point: " << np
+            << ", direction: " << direction << ", flag:" << flag << std::endl;
+    }
+}
+
+
+float fd::calcLineSeg(const float3& origin,
+    const float3& dest, const d_BEAM_d& beam
+) {
+    // the two inputs origin and dest are all normalized w.r.t voxel size,
+    // this function returns the physical distance that the line intersects
+    // with the voxel
+    float3 origin_physical {
+        origin.x * beam.beamlet_size.x,
+
+    };
 }

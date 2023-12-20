@@ -1,4 +1,5 @@
 #include "macros.h"
+#include "beam.cuh"
 // To comply with the definition of rotation in the baseline code, 
 // inverseRotateBeamAtOriginRHS is to rotate the vector from the BEV to PVCS
 // rotateBeamAtOriginRHS is vice versa
@@ -17,4 +18,14 @@ namespace fastdose{
     );
 
     void test_rotateAroundAxisAtOrigin();
+
+    float3 angle2Vector(float theta, float phi);
+
+    void test_angle2Vector();
+
+    float3 nextPoint(const float3& currentLocation, const float3& direction, bool* flag);
+
+    void test_nextPoint();
+
+    float calcLineSeg(const float3& origin, const float3& dest, const d_BEAM_d& beam);
 }

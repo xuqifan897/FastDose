@@ -23,4 +23,7 @@
     #define CUDEV_FXN
 #endif
 
+#define eps_fastdose 1e-4f
+#define WARPSIZE 32
+
 #endif

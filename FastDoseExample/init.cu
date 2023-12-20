@@ -1,11 +1,11 @@
-#include "init.h"
+#include <boost/filesystem.hpp>
+#include "init.cuh"
 #include "argparse.h"
 #include "fastdose.cuh"
 
 #include <vector>
 #include <string>
 #include <fstream>
-#include <boost/filesystem.hpp>
 
 namespace fd = fastdose;
 namespace fs = boost::filesystem;
@@ -111,7 +111,8 @@ bool example::beamsInit(
 
     beams_d.resize(beams_h.size());
     for (int i=0; i<beams_d.size(); i++) {
-        fd::beam_h2d(beams_h[i], beams_d[i]);
+        if (fd::beam_h2d(beams_h[i], beams_d[i]))
+            return 1;
         #if false
             // for debug purposes
             test_TermaBEVPitch(last_beam_d);
@@ -131,6 +132,20 @@ bool example::specInit(fastdose::SPECTRUM_h& spectrum_h) {
         return 1;
 #if false
     fd::test_spectrum(spectrum_h);
+#endif
+    return 0;
+}
+
+bool example::kernelInit(fastdose::KERNEL_h& kernel_h) {
+    fs::path kernel_file(getarg<std::string>("inputFolder"));
+    kernel_file = kernel_file / std::string("kernel_exp_6mv.txt");
+    int nPhi = getarg<int>("nPhi");
+    if (kernel_h.read_kernel_file(kernel_file.string(), nPhi))
+        return 1;
+    if (kernel_h.bind_kernel())
+        return 1;
+#if true
+    fd::test_kernel(kernel_h);
 #endif
     return 0;
 }
