@@ -16,8 +16,6 @@ int main(int argc, char** argv) {
         std::cerr << "Cannot show device properties." << std::endl;
         return 1;
     }
-    fd::test_nextPoint();
-    return 0;
 
     fd::DENSITY_h density_h;
     fd::DENSITY_d density_d;
@@ -48,9 +46,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-#if false
+#if true
     std::string outputFolder = getarg<std::string>("outputFolder");
     if (fd::test_TermaComputeCollective(beams_d, density_d, spectrum_h, outputFolder))
+        return 1;
+#endif
+
+#if true
+    if (fd::test_DoseComputeCollective(beams_d, outputFolder, kernel_h))
         return 1;
 #endif
 }

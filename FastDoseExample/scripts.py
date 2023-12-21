@@ -246,6 +246,40 @@ def cross_validate():
     plt.clf()
 
 
+def view_Dose_BEV():
+    file = '/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseBEV.bin'
+    array = np.fromfile(file, dtype=np.float32)
+    fmap_size_x = 16
+    fmap_size_y = 16
+    assert array.size % (fmap_size_x * fmap_size_y) == 0, "the size doesn't match"
+    dim_long = int(array.size / (fmap_size_x * fmap_size_y))
+    shape = (dim_long, fmap_size_y, fmap_size_x)
+    array = np.reshape(array, shape)
+
+    nan_mask = np.isnan(array)
+    num_nan_elements = np.sum(nan_mask)
+    print("The number of nan elements: {}, the total number of elements: {}".format(num_nan_elements, array.size))
+
+    # Find the slice with the most number of nan and take a view
+    nan_mask_partial = np.sum(nan_mask, axis=(1, 2))
+    print(nan_mask_partial)
+
+
+    scale = 255
+    if True:
+        # take a look at the nan slices
+        slice0 = np.uint8(nan_mask[0, :, :] * scale)
+        file = './figures/nanSlice.png'
+        plt.imsave(file, slice0)
+
+
+    if False:
+        # truncate the nan elements and then take a look
+        array_truncate = array[6: -10]
+        slice = array_truncate[:, 8, :]
+        file = './figures/DoseBEVLong.png'
+        plt.imsave(file, slice)
+
 
 if __name__ == '__main__':
     # beamListGen()
@@ -253,4 +287,5 @@ if __name__ == '__main__':
     # view_Terma_BEV()
     # view_Terma_PVCS()
     # kernelView()
-    cross_validate()
+    # cross_validate()
+    view_Dose_BEV()

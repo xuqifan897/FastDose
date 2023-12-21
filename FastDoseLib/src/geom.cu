@@ -196,14 +196,145 @@ void fd::test_nextPoint() {
 }
 
 
-float fd::calcLineSeg(const float3& origin,
-    const float3& dest, const d_BEAM_d& beam
+float fd::calcLineSeg(
+    const float3& start,
+    const float3& end,
+    const d_BEAM_d& beam
 ) {
     // the two inputs origin and dest are all normalized w.r.t voxel size,
     // this function returns the physical distance that the line intersects
     // with the voxel
-    float3 origin_physical {
-        origin.x * beam.beamlet_size.x,
-
+    float3 start_physical {
+        (start.x - beam.fmap_size.x * 0.5f) * beam.beamlet_size.x,
+        (start.y - beam.fmap_size.y * 0.5f) * beam.beamlet_size.y,
+        start.z * beam.long_spacing
     };
+    float start_physical_z = start_physical.z + beam.lim_min;
+    float factor = start_physical_z / beam.sad;
+    start_physical.x *= factor;
+    start_physical.y *= factor;
+
+    float3 end_physical {
+        (end.x - beam.fmap_size.x * 0.5f) * beam.beamlet_size.x,
+        (end.y - beam.fmap_size.y * 0.5f) * beam.beamlet_size.y,
+        end.z * beam.long_spacing
+    };
+    float end_physical_z = end_physical.z + beam.lim_min;
+    factor = end_physical_z / beam.sad;
+    end_physical.x *= factor;
+    end_physical.y *= factor;
+    
+    float3 diff = end_physical - start_physical;
+    return sqrtf32(dot(diff, diff));
+}
+
+
+bool fd::test_calcLineSeg(const std::vector<d_BEAM_d>& h_beams) {
+    int nSamples = 100;
+    if (nSamples > h_beams.size()) {
+        std::cerr << "Too much samples." << std::endl;
+        return 1;
+    }
+    std::vector<std::pair<float3, float3>> cases(nSamples);
+    // specify two specific cases. In the first case, both the begin
+    // and the end points are on the isocenter plane. So the factor should be 1.
+    float z_norm = (h_beams[0].sad - h_beams[0].lim_min) / h_beams[0].long_spacing;
+    float3 begin = make_float3(
+        rand01() * h_beams[0].fmap_size.x,
+        rand01() * h_beams[0].fmap_size.y,
+        z_norm);
+    float3 end = make_float3(
+        rand01() * h_beams[0].fmap_size.x,
+        rand01() * h_beams[0].fmap_size.y,
+        z_norm);
+    cases[0] = std::make_pair(begin, end);
+
+    // In the second case, both the points are on the line
+    // connecting the source and the isocenter
+    begin = make_float3(
+        h_beams[1].fmap_size.x * 0.5f,
+        h_beams[1].fmap_size.y * 0.5f,
+        rand01() * (h_beams[1].lim_max - h_beams[1].lim_min) / h_beams[1].long_spacing
+    );
+    end = make_float3(
+        begin.x,
+        begin.y,
+        rand01() * (h_beams[1].lim_max - h_beams[1].lim_min) / h_beams[1].long_spacing
+    );
+    cases[1] = std::make_pair(begin, end);
+
+    // Then generate the remaining cases randomly
+    for (int i=2; i<nSamples; i++) {
+        begin = make_float3(
+            rand01() * h_beams[i].fmap_size.x,
+            rand01() * h_beams[i].fmap_size.y,
+            rand01() * h_beams[i].long_dim);
+        end = make_float3(
+            rand01() * h_beams[i].fmap_size.x,
+            rand01() * h_beams[i].fmap_size.y,
+            rand01() * h_beams[i].long_dim);
+        cases[i] = std::make_pair(begin, end);
+    }
+
+    // generate results
+    for (int i=0; i<nSamples; i++) {
+        const float3& begin = cases[i].first;
+        const float3& end = cases[i].second;
+        float distance = calcLineSeg(begin, end, h_beams[i]);
+
+        if (i == 0 || i == 1) {
+            float3 diff = end - begin;
+            diff.x *= h_beams[0].beamlet_size.x;
+            diff.y *= h_beams[0].beamlet_size.y;
+            diff.z *= h_beams[0].long_spacing;
+            float expected = sqrt(dot(diff, diff));
+            std::cout << "Start: " << begin << ", end: " << end <<
+                ", expected: " << expected << ", result: " << distance <<
+                std::endl;
+        }
+    }
+    std::cout << std::endl;
+    return 0;
+}
+
+
+int3 fd::calcCoords(const float3& mid_point, const d_BEAM_d& beam) {
+    float3 result;
+    result.x = fmodf(mid_point.x, static_cast<float>(beam.fmap_size.x));
+    result.y = fmodf(mid_point.y, static_cast<float>(beam.fmap_size.y));
+    result.z = mid_point.z;  // it doesn't get beyond the range
+
+    result.x = (result.x < 0) ? result.x + beam.fmap_size.x : result.x;
+    result.y = (result.y < 0) ? result.y + beam.fmap_size.y : result.y;
+
+    int3 return_value {
+        static_cast<int>(floorf(result.x)),
+        static_cast<int>(floorf(result.y)),
+        static_cast<int>(floorf(result.z))
+    };
+    return return_value;
+}
+
+
+bool fd::test_calcCoords(const std::vector<d_BEAM_d>& h_beams) {
+    int nSamples = 100;
+    if (nSamples > h_beams.size()) {
+        std::cerr << "Too much samples." << std::endl;
+        return 1;
+    }
+
+    float base = -100.f;
+    float range = 200.f;
+    for (int i=0; i<nSamples; i++) {
+        const d_BEAM_d & beam = h_beams[i];
+        float3 mid_point {
+            base + rand01() * range,
+            base + rand01() * range,
+            rand01() * beam.long_dim
+        };
+        int3 result = calcCoords(mid_point, beam);
+        std::cout << "Point: " << mid_point << ", coords: " << result << std::endl;
+    }
+    std::cout << std::endl;
+    return 0;
 }

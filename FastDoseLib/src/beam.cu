@@ -126,6 +126,7 @@ bool fd::test_beam_io() {
     beam_d2h(beam_d, beam_h_new);
     std::cout << "We fisrtly transfer beam_h to beam_d, and secondly from beam_d to beam_h_new:" << std::endl;
     std::cout << beam_h_new << std::endl;
+    return 0;
 }
 
 #define debug_calc_range false

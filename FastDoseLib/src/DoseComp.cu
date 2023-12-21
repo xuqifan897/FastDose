@@ -9,6 +9,9 @@
 #include <cooperative_groups.h>
 #include <cooperative_groups/memcpy_async.h>
 #include <iostream>
+#include <fstream>
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
 
 namespace fastdose {
     __constant__ float d_paramA[MAX_THETA_ANGLES];
@@ -99,6 +102,59 @@ namespace fastdose {
         *flag = abs(stepTake - stepSize.z) < eps_fastdose;
         return currentLocation + stepTake * direction;
     }
+
+
+    static __device__ float d_calcLineSeg(
+        const float3& start,
+        const float3& end,
+        const d_BEAM_d& beam
+    ) {
+        // the two inputs origin and dest are all normalized w.r.t voxel size,
+        // this function returns the physical distance that the line intersects
+        // with the voxel
+        float3 start_physical {
+            (start.x - beam.fmap_size.x * 0.5f) * beam.beamlet_size.x,
+            (start.y - beam.fmap_size.y * 0.5f) * beam.beamlet_size.y,
+            start.z * beam.long_spacing
+        };
+        float start_physical_z = start_physical.z + beam.lim_min;
+        float factor = start_physical_z / beam.sad;
+        start_physical.x *= factor;
+        start_physical.y *= factor;
+
+        float3 end_physical {
+            (end.x - beam.fmap_size.x * 0.5f) * beam.beamlet_size.x,
+            (end.y - beam.fmap_size.y * 0.5f) * beam.beamlet_size.y,
+            end.z * beam.long_spacing
+        };
+        float end_physical_z = end_physical.z + beam.lim_min;
+        factor = end_physical_z / beam.sad;
+        end_physical.x *= factor;
+        end_physical.y *= factor;
+        
+        float3 diff = end_physical - start_physical;
+        return sqrtf(dot(diff, diff));
+    }
+
+
+    static __device__ int3 d_calcCoords(
+        const float3& mid_point, const d_BEAM_d& beam
+    ) {
+        float3 result;
+        result.x = fmodf(mid_point.x, static_cast<float>(beam.fmap_size.x));
+        result.y = fmodf(mid_point.y, static_cast<float>(beam.fmap_size.y));
+        result.z = mid_point.z;  // it doesn't get beyond the range
+
+        result.x = (result.x < 0) ? result.x + beam.fmap_size.x : result.x;
+        result.y = (result.y < 0) ? result.y + beam.fmap_size.y : result.y;
+
+        int3 return_value {
+            static_cast<int>(floorf(result.x)),
+            static_cast<int>(floorf(result.y)),
+            static_cast<int>(floorf(result.z))
+        };
+        return return_value;
+    }
 }
 
 
@@ -121,11 +177,11 @@ bool fastdose::DoseComputeCollective(
     //     1. Terma value
     //     2. Density value
     //     3. Dose value
-    //     4. X value (times the number of phi angles)
+    //     4. X value (times the number of phi angles, for A and B, respectively)
     //     5. convolution directions (times the number of phi angles)
     //     6. base coordinates, which are the coordinates of the
     //        ray originating from the base voxel (times the number of phi angles)
-    int sharedMemorySize = (1 + 1 + 1 + nPhi) * fmap_npixels * sizeof(float)
+    int sharedMemorySize = (1 + 1 + 1 + 2 * nPhi) * fmap_npixels * sizeof(float)
         + nPhi * sizeof(float3) + nPhi * sizeof(float3);
     d_DoseComputeCollective<<<gridSize, blockSize, sharedMemorySize, stream>>>(
         d_beams,
@@ -135,6 +191,7 @@ bool fastdose::DoseComputeCollective(
         nTheta,
         nPhi
     );
+    return 0;
 }
 
 
@@ -151,6 +208,7 @@ fastdose::d_DoseComputeCollective(
     d_BEAM_d beam = beams[beam_idx];
     float* TermaBEV = TermaBEV_array[beam_idx];
     float* DensityBEV = DensityBEV_array[beam_idx];
+    float* DoseBEV = DoseBEV_array[beam_idx];
 
     int pixel_idx = threadIdx.x;
     int idx_x = pixel_idx % beam.fmap_size.x;
@@ -162,7 +220,7 @@ fastdose::d_DoseComputeCollective(
     //     1. Terma value
     //     2. Density value
     //     3. Dose value
-    //     4. X value (times the number of phi angles)
+    //     4. X value (times the number of phi angles, for A and B, respectively)
     //     5. convolution directions (times the number of phi angles)
     //     6. base coordinates (times the number of phi angles)
     int fmap_npixels = beam.fmap_size.x * beam.fmap_size.y;
@@ -170,8 +228,9 @@ fastdose::d_DoseComputeCollective(
     float* SharedTerma = sharedData;
     float* SharedDensity = SharedTerma + fmap_npixels;
     float* SharedDose = SharedDensity + fmap_npixels;
-    float* SharedX = SharedDose + fmap_npixels;
-    float3* directions = (float3*)(SharedX + nPhi * fmap_npixels);
+    float* SharedXA = SharedDose + fmap_npixels;
+    float* SharedXB = SharedXA + nPhi * fmap_npixels;
+    float3* directions = (float3*)(SharedXB + nPhi * fmap_npixels);
     float3* baseCoords = directions + nPhi;
 
     auto block = cooperative_groups::this_thread_block();
@@ -184,11 +243,16 @@ fastdose::d_DoseComputeCollective(
         if (thetaAngle > CUDART_PIO2)
             continue;
 
+        float A = d_paramA[thetaIdx];
+        float a = d_parama[thetaIdx];
+        float B = d_paramB[thetaIdx];
+        float b = d_paramb[thetaIdx];
+
         // Initialize SharedX
         for (int phiIdx=0; phiIdx<nPhi; phiIdx++) {
-            SharedX[phiIdx * fmap_npixels + pixel_idx] = 0.f;
+            SharedXA[phiIdx * fmap_npixels + pixel_idx] = 0.f;
+            SharedXB[phiIdx * fmap_npixels + pixel_idx] = 0.f;
         }
-        // __syncthreads();
 
         // Initialize directions
         if (pixel_idx < nPhi) {
@@ -204,22 +268,30 @@ fastdose::d_DoseComputeCollective(
             directions[pixel_idx] = normalize(directions[pixel_idx]);
         
             // Initialize baseCoords
-            baseCoords[pixel_idx] = make_float3(.5f, .5f, 0.f);
+            baseCoords[pixel_idx] = make_float3(0.5f, 0.5f, 0.0f);
         }
+        __syncthreads();
 
 
         while (true) {
-            // load Terma and Density of the current slice
+            // load Terma and Density of the current slice, and initialize the Dose
             int sliceIdx = (int)roundf(baseCoords[0].z);
+            if (sliceIdx >= beam.long_dim)
+                break;
+            
             size_t global_idx = sliceIdx * pitch_float;
             cooperative_groups::memcpy_async(block, SharedTerma,
                 TermaBEV+global_idx, fmap_npixels*sizeof(float));
             cooperative_groups::memcpy_async(block, SharedDensity,
                 DensityBEV+global_idx, fmap_npixels*sizeof(float));
+            cooperative_groups::wait(block);  // synchronize immediately
+            
+            SharedDose[pixel_idx] = 0.0f;
 
             for (int phi_idx=0; phi_idx<nPhi; phi_idx++) {
                 // process the phi_idx
-                float* SharedX_local = SharedX + phi_idx * fmap_npixels;
+                float* SharedXA_local = SharedXA + phi_idx * fmap_npixels;
+                float* SharedXB_local = SharedXB + phi_idx * fmap_npixels;
                 float3& directions_local = directions[phi_idx];
                 float3& baseCoords_local = baseCoords[phi_idx];
 
@@ -227,39 +299,65 @@ fastdose::d_DoseComputeCollective(
                 while (true) {
                     // compute the next interaction point
                     bool flag;
-                    __syncthreads();  // synchronization between computataion
+                    __syncthreads();  // since baseCoords_local is modified by the 0'th thread, a synchronization is needed
                     float3 np = d_nextPoint(baseCoords_local, directions_local, &flag);
                     
-                    // float lineSeg = 
+                    float3 baseCoords_thread {
+                        baseCoords_local.x + idx_x,
+                        baseCoords_local.y + idx_y,
+                        baseCoords_local.z
+                    };
+
+                    float3 np_thread {
+                        np.x + idx_x,
+                        np.y + idx_y,
+                        np.z
+                    };
+
+                    // to tell if the ray has crossed a boundary
+                    if (floorf(baseCoords_thread.x / beam.fmap_size.x) != floorf(np_thread.x / beam.fmap_size.x) ||
+                        floorf(baseCoords_thread.y / beam.fmap_size.y) != floorf(np_thread.y / beam.fmap_size.y)
+                    ) {
+                        SharedXA_local[pixel_idx] = 0.0f;
+                        SharedXB_local[pixel_idx] = 0.0f;
+                    }
+
+                    // determine the current voxel idx
+                    float3 mid_point = (baseCoords_thread + np_thread) * 0.5f;
+                    int3 mid_idx = d_calcCoords(mid_point, beam);
+                    int mid_idx_linear = mid_idx.x + mid_idx.y * beam.fmap_size.x;
+
+                    float localTerma = SharedTerma[mid_idx_linear];
+                    float localDensity = SharedDensity[mid_idx_linear];
+                    float localXA = SharedXA_local[pixel_idx];
+                    float localXB = SharedXB_local[pixel_idx];
+
+                    float p_i = d_calcLineSeg(baseCoords_thread, np_thread, beam) * localDensity;
+                    float ap_i = a * p_i;
+                    float bp_i = b * p_i;
+                    float exp_minus_ap_i = __expf(-ap_i);
+                    float exp_minus_bp_i = __expf(-bp_i);
+                    float ga_i = (1 - exp_minus_ap_i) / ap_i;
+                    float gb_i = (1 - exp_minus_bp_i) / bp_i;
+                    SharedDose[mid_idx_linear] += A / a * ((1 - ga_i) * localTerma + ga_i * localXA)
+                        + B / b * ((1 - gb_i) * localTerma + gb_i * localXB);
+                    
+                    // update SharedX
+                    SharedXA_local[pixel_idx] = localTerma * (1 - exp_minus_ap_i) + exp_minus_ap_i * localXA;
+                    SharedXB_local[pixel_idx] = localTerma * (1 - exp_minus_bp_i) + exp_minus_bp_i * localXB;
+
+                    // update baseCoords_local
+                    if (pixel_idx == 0)
+                        baseCoords_local = np;
 
                     // reaches the next slice
                     if (flag)
                         break;
                 }
             }
-            
-            // stop condition
-            if (baseCoords[0].z + eps_fastdose >= beam.long_dim)
-                break;
+            // update global dose
+            DoseBEV[global_idx + pixel_idx] += SharedDose[pixel_idx];
         }
-
-        // int iter_x_prev = -1;
-        // int iter_y_prev = -1;
-        // int iter_z_prev = -1;
-        // int iter_x = 0;
-        // int iter_y = 0;
-        // int iter_z = 0;
-        // while (iter_z < beam.long_dim) {
-        //     if (iter_z != iter_z_prev) {
-        //         // At a new slice now, initialize the dose matrix
-        //         size_t global_idx = iter_z * pitch_float;
-        //         cooperative_groups::memcpy_async(block, SharedTerma,
-        //             TermaBEV+global_idx, fmap_npixels*sizeof(float));
-        //         cooperative_groups::memcpy_async(block, SharedDensity,
-        //             DensityBEV+global_idx, fmap_npixels*sizeof(float));
-        //         SharedDose[pixel_idx] = 0.f;
-        //     }
-        // }
     }
 }
 
@@ -276,6 +374,16 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
     checkCudaErrors(cudaMalloc((void**)&d_beams, beams.size()*sizeof(d_BEAM_d)));
     checkCudaErrors(cudaMemcpy(d_beams, h_beams.data(),
         beams.size()*sizeof(d_BEAM_d), cudaMemcpyHostToDevice));
+
+#if false
+    // Test the function calcLineSeg
+    if (test_calcLineSeg(h_beams))
+        return 1;
+    if (test_calcCoords(h_beams))
+        return 1;
+    checkCudaErrors(cudaFree(d_beams));
+    return 0;
+#endif
 
     // allocate TermaBEV_array
     std::vector<float*> h_TermaBEV_array(beams.size(), nullptr);
@@ -307,7 +415,7 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
     size_t fmap_npixels = beams[0].fmap_size.x * beams[0].fmap_size.y;
 
     
-    if (DoseComputeCollective (
+    DoseComputeCollective(
         fmap_npixels,
         beams.size(),
         d_beams,
@@ -317,9 +425,26 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
         kernel_h.nTheta,
         kernel_h.nPhi,
         stream
-    ))
-        return 1;
+    );
 
+
+    // retrieve result
+    size_t nVoxels = beams[0].fmap_size.x * beams[0].fmap_size.y * beams[0].long_dim;
+    size_t pitch_host = beams[0].fmap_size.x * beams[0].fmap_size.y;
+    std::vector<float> DoseBEV_example(nVoxels, 0.0f);
+    checkCudaErrors(cudaMemcpy2D(
+        DoseBEV_example.data(), pitch_host*sizeof(float),
+        beams[0].DoseBEV, beams[0].DoseBEV_pitch,
+        pitch_host*sizeof(float), beams[0].long_dim, cudaMemcpyDeviceToHost));
+    
+    fs::path DoseFile = fs::path(outputFolder) / std::string("DoseBEV.bin");
+    std::ofstream f(DoseFile.string());
+    if (! f.is_open()) {
+        std::cerr << "Could not open file: " << DoseFile.string() << std::endl;
+        return 1;
+    }
+    f.write((char*)DoseBEV_example.data(), nVoxels*sizeof(float));
+    f.close();
 
     // clean up
     checkCudaErrors(cudaFree(d_beams));

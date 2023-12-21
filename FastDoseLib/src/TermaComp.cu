@@ -352,7 +352,7 @@ bool fd::test_TermaComputeCollective(
 
     fs::path TermaFile = fs::path(outputFolder) / std::string("TermaBEV.bin");
     f.open(TermaFile.string());
-    if (! f) {
+    if (! f.is_open()) {
         std::cerr << "Could not open file: " << TermaFile.string() << std::endl;
         return 1;
     }

@@ -1,6 +1,7 @@
 #ifndef __DOSECOMP_CUH__
 #define __DOSECOMP_CUH__
 #include "beam.cuh"
+#include "kernel.cuh"
 
 namespace fastdose {
     bool DoseComputeCollective(

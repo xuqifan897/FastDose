@@ -27,5 +27,11 @@ namespace fastdose{
 
     void test_nextPoint();
 
-    float calcLineSeg(const float3& origin, const float3& dest, const d_BEAM_d& beam);
+    float calcLineSeg(const float3& start, const float3& end, const d_BEAM_d& beam);
+
+    bool test_calcLineSeg(const std::vector<d_BEAM_d>& h_beams);
+
+    int3 calcCoords(const float3& mid_point, const d_BEAM_d& beam);
+
+    bool test_calcCoords(const std::vector<d_BEAM_d>& h_beams);
 }
