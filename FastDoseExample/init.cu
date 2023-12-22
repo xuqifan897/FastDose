@@ -91,6 +91,7 @@ bool example::beamsInit(
 
     std::string tableRow;
     bool skipFirst = true;
+    bool firstBeam = true;
     while (std::getline(f, tableRow)) {
         if (skipFirst) {
             skipFirst = false;
@@ -105,6 +106,14 @@ bool example::beamsInit(
         last_beam.fmap_size.x >> last_beam.fmap_size.y >> last_beam.long_spacing;
         int n_beamlets = last_beam.fmap_size.x * last_beam.fmap_size.y;
         last_beam.fluence = std::vector<float>(n_beamlets, 1.);
+
+        // Manually modify the first beam to the standard angle
+        if (firstBeam) {
+            last_beam.angles.x = 0.0f;
+            last_beam.angles.y = 0.0f;
+            last_beam.angles.z = 0.0f;
+            firstBeam = false;
+        }
 
         last_beam.calc_range(density_h);
     }

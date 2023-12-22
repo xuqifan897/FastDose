@@ -255,30 +255,168 @@ def view_Dose_BEV():
     dim_long = int(array.size / (fmap_size_x * fmap_size_y))
     shape = (dim_long, fmap_size_y, fmap_size_x)
     array = np.reshape(array, shape)
+    central_long = int(dim_long / 2)
 
-    nan_mask = np.isnan(array)
-    num_nan_elements = np.sum(nan_mask)
-    print("The number of nan elements: {}, the total number of elements: {}".format(num_nan_elements, array.size))
+    slice_long = array[:, :, 8]
+    slice_trans = array[central_long, :,:]
+    file_long = './figures/DoseBEVLong.png'
+    file_trans = './figures/DoseBEVTrans.png'
+    plt.imsave(file_long, slice_long)
+    plt.imsave(file_trans, slice_trans)
 
-    # Find the slice with the most number of nan and take a view
-    nan_mask_partial = np.sum(nan_mask, axis=(1, 2))
-    print(nan_mask_partial)
 
-
-    scale = 255
-    if True:
-        # take a look at the nan slices
-        slice0 = np.uint8(nan_mask[0, :, :] * scale)
-        file = './figures/nanSlice.png'
-        plt.imsave(file, slice0)
-
+def DoseCompDebug():
+    debugLogFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug.bin"
+    shape = (16, 16)
+    array = np.fromfile(debugLogFile, dtype=np.float32)
+    array = np.reshape(array, shape)
 
     if False:
-        # truncate the nan elements and then take a look
-        array_truncate = array[6: -10]
-        slice = array_truncate[:, 8, :]
-        file = './figures/DoseBEVLong.png'
-        plt.imsave(file, slice)
+        TermaFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/TermaBEV.bin"
+    else:
+        TermaFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DensityBEV.bin"
+    TermaArray = np.fromfile(TermaFile, dtype=np.float32)
+    assert TermaArray.size % (shape[0] * shape[1]) == 0
+    dimZ = int(TermaArray.size / (shape[0] * shape[1]))
+    TermaShape = (dimZ, shape[1], shape[0])
+    TermaArray = np.reshape(TermaArray, TermaShape)
+    TermaSlice = TermaArray[0, :, :]
+    diff = array - TermaSlice
+    print("diff:")
+    print(diff)
+    print("\noriginal:")
+    print(array)
+
+
+def examine_Dose_BEV():
+    file = '/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseBEV.bin'
+    array = np.fromfile(file, dtype=np.float32)
+    fmap_size_x = 16
+    fmap_size_y = 16
+    voxelSize = 0.25
+    assert array.size % (fmap_size_x * fmap_size_y) == 0, "the size doesn't match"
+    dim_long = int(array.size / (fmap_size_x * fmap_size_y))
+    shape = (dim_long, fmap_size_y, fmap_size_x)
+    array = np.reshape(array, shape)
+
+    partialFlag = False
+    if partialFlag:
+        # Show partial dose
+        doseLine = np.sum(array, axis=(1, 2))
+    else:
+        # Show centerline dose
+        mid_x = int(fmap_size_x / 2)
+        mid_y = int(fmap_size_y / 2)
+        doseLine = array[:, mid_x, mid_y]
+    depth = np.arange(dim_long) * voxelSize
+    plt.plot(depth, doseLine)
+    plt.xlabel('depth (cm)')
+    plt.ylabel('dose')
+    if partialFlag:
+        plt.title('Partial dose')
+        figureFile = './figures/partialDose.png'
+    else:
+        plt.title("Centerline dose")
+        figureFile = './figures/centerlineDose.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
+
+def examine_X():
+    """
+    This function examines the intermediate values XA
+    """
+    file = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug_VoxelIdx.bin"
+    shape = (1024, 16, 16)
+    array = np.fromfile(file, dtype=np.float32)
+    array = np.reshape(array, shape)
+    # view the partial sum
+    array_partial = np.sum(array, axis=(1, 2))
+
+    # get the non zero values
+    nNonzero = np.sum(array_partial > 0)
+    print("Number of non-zero values: ", nNonzero)
+    # get the corresponding dose matrix.
+    DoseFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseBEV.bin"
+    DoseArray = np.fromfile(DoseFile, np.float32)
+    sliceShape = (16, 16)
+    dimZ = int(DoseArray.size / (sliceShape[0] * sliceShape[1]))
+    print("Dose dimension Z: ", dimZ)
+
+    if True:
+        x_value = np.arange(nNonzero)
+        plt.plot(x_value, array_partial[:nNonzero])
+        plt.xlabel('layer')
+        plt.ylabel('partialX')
+        plt.title('XA')
+        figureFile = './figures/partialX.png'
+        plt.savefig(figureFile)
+        plt.clf()
+    
+    if True:
+        array_centerline = array[:, 8, 8]
+        plt.plot(x_value, array_centerline[:nNonzero])
+        plt.xlabel('layer')
+        plt.ylabel('centerlineX')
+        plt.title('XA')
+        figureFile = './figures/centerlineX.png'
+        plt.savefig(figureFile)
+        plt.clf()
+
+
+def examineDoseStep():
+    """
+    This function examines the dose step by step
+    """
+    DoseFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseDebug.bin"
+    XFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug_VoxelIdx.bin"
+    shape = (1024, 16, 16)
+    centerlineIdx = int(shape[2] / 2)
+
+    DoseArray = np.fromfile(DoseFile, dtype=np.float32)
+    DoseArray = np.reshape(DoseArray, shape)
+    DoseCenterline = DoseArray[:, centerlineIdx, centerlineIdx]
+
+    XArray = np.fromfile(XFile, dtype=np.float32)
+    XArray = np.reshape(XArray, shape)
+    XArrayCenterline = XArray[:, centerlineIdx, centerlineIdx]
+
+    # find the last non-zero elements
+    non_zero_idx = 0
+    for i in range(XArrayCenterline.size):
+        if XArrayCenterline[i] > 0:
+            non_zero_idx = i
+    x_coords = np.arange(non_zero_idx)
+    plt.plot(x_coords, XArrayCenterline[:non_zero_idx])
+    plt.xlabel('layer')
+    plt.ylabel('centerlineX')
+    plt.title('XA')
+    figureFile = './figures/centerlineX.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
+    plt.plot(x_coords, DoseCenterline[:non_zero_idx])
+    plt.xlabel('layer')
+    plt.ylabel('centerline ga (a.u.)')
+    plt.title('Dose')
+    figureFile = './figures/centerlineGA.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
+    TermaFile = '/data/qifan/projects/EndtoEnd/results/CCCSBench/TermaBEV.bin'
+    TermaArray = np.fromfile(TermaFile, dtype=np.float32)
+    TermaDimZ = int(TermaArray.size / (16 * 16))
+    TermaShape = (TermaDimZ, 16, 16)
+    TermaArray = np.reshape(TermaArray, TermaShape)
+    TermaCenterline = TermaArray[:, 8, 8]
+    x_coords = np.arange(TermaDimZ)
+    plt.plot(x_coords, TermaCenterline)
+    plt.xlabel('layer')
+    plt.ylabel('centerline Terma (a.u.)')
+    plt.title("Terma")
+    figureFile = './figures/centerlineTerma.png'
+    plt.savefig(figureFile)
+    plt.clf()
 
 
 if __name__ == '__main__':
@@ -288,4 +426,8 @@ if __name__ == '__main__':
     # view_Terma_PVCS()
     # kernelView()
     # cross_validate()
-    view_Dose_BEV()
+    # view_Dose_BEV()
+    # DoseCompDebug()
+    # examine_Dose_BEV()
+    # examine_X()
+    examineDoseStep()
