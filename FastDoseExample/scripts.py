@@ -326,7 +326,11 @@ def examine_X():
     """
     This function examines the intermediate values XA
     """
-    file = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug_VoxelIdx.bin"
+    idx_flag = False
+    if idx_flag:
+        file = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug_VoxelIdx.bin"
+    else:
+        file = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug.bin"
     shape = (1024, 16, 16)
     array = np.fromfile(file, dtype=np.float32)
     array = np.reshape(array, shape)
@@ -343,8 +347,8 @@ def examine_X():
     dimZ = int(DoseArray.size / (sliceShape[0] * sliceShape[1]))
     print("Dose dimension Z: ", dimZ)
 
-    if True:
-        x_value = np.arange(nNonzero)
+    x_value = np.arange(nNonzero)
+    if False:
         plt.plot(x_value, array_partial[:nNonzero])
         plt.xlabel('layer')
         plt.ylabel('partialX')
@@ -359,7 +363,10 @@ def examine_X():
         plt.xlabel('layer')
         plt.ylabel('centerlineX')
         plt.title('XA')
-        figureFile = './figures/centerlineX.png'
+        if idx_flag:
+            figureFile = './figures/centerlineX.png'
+        else:
+            figureFile = './figures/rayTraceX.png'
         plt.savefig(figureFile)
         plt.clf()
 
@@ -399,7 +406,9 @@ def examineDoseStep():
     plt.xlabel('layer')
     plt.ylabel('centerline ga (a.u.)')
     plt.title('Dose')
-    figureFile = './figures/centerlineGA.png'
+    # figureFile = './figures/centerlineGA.png'
+    # figureFile = './figures/centerlineLineSegDose.png'
+    figureFile = './figures/centerlineSharedDose.png'
     plt.savefig(figureFile)
     plt.clf()
 
@@ -418,6 +427,49 @@ def examineDoseStep():
     plt.savefig(figureFile)
     plt.clf()
 
+    RealDoseFile = '/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseBEV.bin'
+    RealDoseArray = np.fromfile(RealDoseFile, dtype=np.float32)
+    RealDoseDimZ = int(RealDoseArray.size / (16*16))
+    RealDoseShape = (RealDoseDimZ, 16, 16)
+    RealDoseArray = np.reshape(RealDoseArray, RealDoseShape)
+    RealDoseCenterline = RealDoseArray[:, 8, 8]
+    x_coords = np.arange(RealDoseDimZ)
+    plt.plot(x_coords, RealDoseCenterline)
+    plt.xlabel('depth')
+    plt.ylabel('centerline dose (a.u.)')
+    plt.title('Dose')
+    figureFile = './figures/centerlineRealDose.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
+
+def overlayTermaAndX():
+    XFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/DoseCompDebug_VoxelIdx.bin"
+    shape = (1024, 16, 16)
+    centerlineIdx = int(shape[2] / 2)
+    XArray = np.fromfile(XFile, dtype=np.float32)
+    XArray = np.reshape(XArray, shape)
+    XArrayCenterline = XArray[:, centerlineIdx, centerlineIdx]
+    non_zero_idx = 0
+    for i in range(XArrayCenterline.size):
+        if XArrayCenterline[i] > 0:
+            non_zero_idx = i
+    x_coords = np.arange(non_zero_idx)
+    plt.plot(x_coords, XArrayCenterline[:non_zero_idx])
+
+    TermaFile = '/data/qifan/projects/EndtoEnd/results/CCCSBench/TermaBEV.bin'
+    TermaArray = np.fromfile(TermaFile, dtype=np.float32)
+    TermaDimZ = int(TermaArray.size / (16 * 16))
+    TermaShape = (TermaDimZ, 16, 16)
+    TermaArray = np.reshape(TermaArray, TermaShape)
+    TermaCenterline = TermaArray[:, 8, 8]
+    x_coords = np.arange(TermaDimZ)
+    plt.plot(x_coords, TermaCenterline)
+    plt.legend(["XA", "Terma"])
+    figureFile = 'figures/overlayTermaAndX.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
 
 if __name__ == '__main__':
     # beamListGen()
@@ -431,3 +483,4 @@ if __name__ == '__main__':
     # examine_Dose_BEV()
     # examine_X()
     examineDoseStep()
+    # overlayTermaAndX()

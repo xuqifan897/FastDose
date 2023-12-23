@@ -258,3 +258,35 @@ X_{i+1} &= \sum_{j=0}^{i} T_je^{-ar(x_j; x_{i+1})} (e^{ap_j}-1) \\
 &=T_i (1-e^{-ap_i}) + e^{-ap_i}X_i.
 \end{split}
 $$
+
+### Correction
+I've noticed a problem associated with the derivation above. We start with the following theory:
+$$
+D(x)=\int_0^x T(p)e^{-a(x-p)} adp.
+$$
+Then we focus on the line segment: $[x_1, x_2]$. The average dose on this line segment is:
+$$
+\begin{align*}
+D_{avg}(x_1;x_2) &= \frac{1}{x_2-x_1} \int_{x_1}^{x_2}D(x)dx \\
+&= \frac{1}{x_2-x_1} \int_{x_1}^{x_2} dx \int_{0}^{x}T(p)e^{-a(x-p)}adp.
+\end{align*}
+$$
+We assume the dose across the line segment $[x_1,x_2]$ is constant. We then can rewrite
+$$
+\begin{align*}
+D(x) &= \int_{0}^{x} T(p)e^{-a(x-p)}adp \\
+&= \int_{0}^{x_1} T(p)e^{-a(x-p)}adp + \int_{x_1}^{x} T(p)e^{-a(x-p)}adp \\
+&= e^{-a(x-x_1)} \int_0^{x_1} T(p)e^{-a(x_1 - p)}adp + T(x_1;x_2) \left. e^{a(p-x)} \right|_{x_1}^x \\
+&= e^{-a(x-x_1)} \int_0^{x_1} T(p)e^{-a(x_1 - p)} adp + T(x_1;x_2) (1 - e^{-a(x-x_1)}). \\
+&= e^{-a(x-x_1)} D(x_1) + T(x_1;x_2) (1-e^{-a(x-x_1)}).
+\end{align*}
+$$
+So the average dose across the line segment $[x_1, x_2]$ is:
+$$
+\begin{align*}
+D_{avg}(x_1;x_2) &= \frac{1}{x_2-x_1} \int_{x_1}^{x_2} \left( e^{-a(x-x_1)}D(x_1) + T(x_1;x_2)(1-e^{-a(x-x_1)}) \right) dx \\
+&= \frac{1}{x_2-x_1} \left( D(x_1)\frac{1}{-a} \left. e^{-a(x-x_1)} \right|_{x_1}^{x_2} \right) + \frac{1}{x_2-x_1}T(x_1;x_2) \left.\left( x + \frac{1}{a}e^{-a(x-x_1)} \right)\right|_{x_1}^{x_2} \\
+&= \frac{1}{x_2-x_1} \left( D(x_1) \frac{1}{a} (1-e^{-a(x_2-x_1)}) \right) + \frac{1}{x_2-x_1}T(x_1;x_2)\left( (x_2-x_1) + \frac{1}{a}(e^{-a(x_2-x_1)}-1)\right) \\
+&=\frac{1-e^{-a(x_2-x_1)}}{a(x_2-x_1)}D(x_1) + \left( 1 - \frac{1-e^{-a(x_2-x_1)}}{a(x_2-x_1)} \right) T(x_1;x_2)
+\end{align*}
+$$

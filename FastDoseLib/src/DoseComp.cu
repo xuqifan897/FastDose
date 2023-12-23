@@ -380,17 +380,21 @@ fastdose::d_DoseComputeCollective(
                     float localXA = SharedXA_local[pixel_idx];
                     float localXB = SharedXB_local[pixel_idx];
 
-                    float p_i = d_calcLineSeg(baseCoords_thread, np_thread, beam) * localDensity;
+                    float p_i = d_calcLineSeg(baseCoords_thread, np_thread, beam) * localDensity + eps_fastdose;
                     float ap_i = a * p_i;
                     float bp_i = b * p_i;
                     float exp_minus_ap_i = __expf(-ap_i);
                     float exp_minus_bp_i = __expf(-bp_i);
-                    float ga_i_times_p_i = (1 - exp_minus_ap_i) / a;
-                    float gb_i_times_p_i = (1 - exp_minus_bp_i) / b;
-                    float lineSegDose_times_p_i = 
-                        A / a * ((p_i - ga_i_times_p_i) * localTerma + ga_i_times_p_i * localXA) +
-                        B / b * ((p_i - gb_i_times_p_i) * localTerma + gb_i_times_p_i * localXB);
-                    SharedDose[mid_idx_linear] += lineSegDose_times_p_i;
+                    float ga_i = (1 - exp_minus_ap_i) / ap_i;
+                    float gb_i = (1 - exp_minus_bp_i) / bp_i;
+                    #if XDebug || DoseDebug
+                        float lineSegDose = A / a * ((1 - ga_i) * localTerma + ga_i * localXA);
+                    #else
+                        float lineSegDose = 
+                            A / a * ((1 - ga_i) * localTerma + ga_i * localXA) +
+                            B / b * ((1 - gb_i) * localTerma + gb_i * localXB);
+                    #endif
+                    SharedDose[mid_idx_linear] += lineSegDose * p_i;
                     cumu_p_i[mid_idx_linear] += p_i;
                     
                     // update SharedX
@@ -419,10 +423,11 @@ fastdose::d_DoseComputeCollective(
                             #endif
                             debugCount += fmap_npixels;
                     #elif DoseDebug
-                        if (beam_idx == 0)
-                            debugProbe[mid_idx_linear + debugCount] =
-                                ga_i_times_p_i / (p_i + eps_fastdose);
-                            debugCount += fmap_npixels;
+                        // if (beam_idx == 0)
+                            // debugProbe[mid_idx_linear + debugCount] = lineSegDose;
+                            // debugProbe[mid_idx_linear + debugCount] = SharedDose[mid_idx_linear] / cumu_p_i[mid_idx_linear];
+                            // debugProbe[pixel_idx + debugCount] = SharedDose[pixel_idx] / cumu_p_i[pixel_idx];
+                            // debugCount += fmap_npixels;
                     #endif
 
                     // reaches the next slice
@@ -430,6 +435,13 @@ fastdose::d_DoseComputeCollective(
                         break;
                 }
             }
+
+            // __syncthreads();
+            // // for debug purposes
+            // debugProbe[pixel_idx + debugCount] = SharedDose[pixel_idx] / cumu_p_i[pixel_idx];
+            // debugCount += fmap_npixels;
+            // __syncthreads();
+
             // update global dose
             DoseBEV[global_idx + pixel_idx] += SharedDose[pixel_idx] / (cumu_p_i[pixel_idx] + eps_fastdose);
         }
