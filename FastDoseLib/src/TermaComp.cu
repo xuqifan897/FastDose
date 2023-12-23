@@ -324,7 +324,7 @@ bool fd::test_TermaComputeCollective(
     float milliseconds = 0.0f;
     cudaEventElapsedTime(&milliseconds, start, stop);
 
-    std::cout << "Time elapsed: " << milliseconds << " [ms]"<< std::endl;
+    std::cout << "Terma time elapsed: " << milliseconds << " [ms]"<< std::endl;
 
     // retrieve result
     size_t nVoxels = beams[0].fmap_size.x * beams[0].fmap_size.y * beams[0].long_dim;

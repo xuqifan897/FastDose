@@ -155,6 +155,17 @@ namespace fastdose {
         };
         return return_value;
     }
+
+
+    static __device__ float d_calcg(float x) {
+        // This function calculates the approximation of Tayler expansion:
+        // (1 - e^{-x}) / x = 1 - 1/2x + 1/6x^2 - 1/24x^3 ...
+        float result = x * (- 1 / 24);
+        result = x * ( 1 / 6 + result);
+        result = x * (- 1 / 2 + result);
+        result = 1 + result;
+        return result;
+    }
 }
 
 
@@ -168,7 +179,7 @@ bool fastdose::DoseComputeCollective(
     int nTheta,
     int nPhi,
     cudaStream_t stream
-#if XDebug || DoseDebug
+#if DoseDebug
     , const std::string outputFolder
 #endif
 ) {
@@ -187,7 +198,7 @@ bool fastdose::DoseComputeCollective(
     //        ray originating from the base voxel (times the number of phi angles)
     int sharedMemorySize = (1 + 1 + 1 + 1 + 2 * nPhi) * fmap_npixels * sizeof(float)
         + nPhi * sizeof(float3) + nPhi * sizeof(float3);
-#if XDebug || DoseDebug
+#if DoseDebug
     float* debugProbe;
     checkCudaErrors(cudaMalloc((void**)&debugProbe, probeSize*sizeof(float)));
     checkCudaErrors(cudaMemset(debugProbe, 0., probeSize*sizeof(float)));
@@ -211,21 +222,7 @@ bool fastdose::DoseComputeCollective(
     );
 #endif
 
-#if XDebug
-    std::vector<float> h_debugProbe(probeSize);
-    checkCudaErrors(cudaMemcpy(h_debugProbe.data(), debugProbe,
-        probeSize*sizeof(float), cudaMemcpyDeviceToHost));
-    fs::path debugFile(outputFolder);
-    #if ProbePixelIdx
-        debugFile /= std::string("DoseCompDebug_ThreadIdx.bin");
-    #else
-        debugFile /= std::string("DoseCompDebug_VoxelIdx.bin");
-    #endif
-    std::ofstream f(debugFile.string());
-    f.write((char*)(h_debugProbe.data()), probeSize*sizeof(float));
-    checkCudaErrors(cudaFree(debugProbe));
-
-#elif DoseDebug
+#if DoseDebug
     std::vector<float> h_debugProbe(probeSize);
     checkCudaErrors(cudaMemcpy(h_debugProbe.data(), debugProbe,
         probeSize*sizeof(float), cudaMemcpyDeviceToHost));
@@ -247,7 +244,7 @@ fastdose::d_DoseComputeCollective(
     float** DoseBEV_array,
     int nTheta,
     int nPhi
-#if XDebug || DoseDebug
+#if DoseDebug
     , float* debugProbe
 #endif
 ) {
@@ -287,7 +284,7 @@ fastdose::d_DoseComputeCollective(
     // Here we assume beam.TermaBEV_pitch == beam.DoseBEV_pitch == beam.DensityBEV_pitch
     size_t pitch_float = beam.TermaBEV_pitch / sizeof(float);
 
-    #if XDebug || DoseDebug
+    #if DoseDebug
         size_t debugCount = 0;
     #endif
 
@@ -380,20 +377,19 @@ fastdose::d_DoseComputeCollective(
                     float localXA = SharedXA_local[pixel_idx];
                     float localXB = SharedXB_local[pixel_idx];
 
-                    float p_i = d_calcLineSeg(baseCoords_thread, np_thread, beam) * localDensity + eps_fastdose;
+                    float p_i = d_calcLineSeg(baseCoords_thread, np_thread, beam) * localDensity;
                     float ap_i = a * p_i;
                     float bp_i = b * p_i;
                     float exp_minus_ap_i = __expf(-ap_i);
                     float exp_minus_bp_i = __expf(-bp_i);
-                    float ga_i = (1 - exp_minus_ap_i) / ap_i;
-                    float gb_i = (1 - exp_minus_bp_i) / bp_i;
-                    #if XDebug || DoseDebug
-                        float lineSegDose = A / a * ((1 - ga_i) * localTerma + ga_i * localXA);
-                    #else
-                        float lineSegDose = 
-                            A / a * ((1 - ga_i) * localTerma + ga_i * localXA) +
-                            B / b * ((1 - gb_i) * localTerma + gb_i * localXB);
-                    #endif
+                    float ga_i = d_calcg(ap_i);
+                    float gb_i = d_calcg(bp_i);
+
+                    // float lineSegDose = B / b * ((1 - gb_i) * localTerma + gb_i * localXB);
+                    // float lineSegDose = A / a * ((1 - ga_i) * localTerma + ga_i * localXA);
+                    float lineSegDose = 
+                        A / a * ((1 - ga_i) * localTerma + ga_i * localXA) +
+                        B / b * ((1 - gb_i) * localTerma + gb_i * localXB);
                     SharedDose[mid_idx_linear] += lineSegDose * p_i;
                     cumu_p_i[mid_idx_linear] += p_i;
                     
@@ -409,40 +405,24 @@ fastdose::d_DoseComputeCollective(
                         SharedXB_local[pixel_idx] = 0.0f;
                     }
 
+                    #if DoseDebug
+                    if (beam_idx == 0) {
+                        // debugProbe[debugCount + mid_idx_linear] = exp_minus_bp_i;
+                        debugProbe[debugCount + pixel_idx] = localXB;
+                        debugCount += fmap_npixels;
+                    }
+                    #endif
+
                     // update baseCoords_local
                     if (pixel_idx == 0)
                         baseCoords_local = np;
                     __syncthreads();
-
-                    #if XDebug
-                        if (beam_idx == 0)
-                            #if ProbePixelIdx
-                                debugProbe[pixel_idx + debugCount] = localXA;
-                            #else
-                                debugProbe[mid_idx_linear + debugCount] = localXA;
-                            #endif
-                            debugCount += fmap_npixels;
-                    #elif DoseDebug
-                        // if (beam_idx == 0)
-                            // debugProbe[mid_idx_linear + debugCount] = lineSegDose;
-                            // debugProbe[mid_idx_linear + debugCount] = SharedDose[mid_idx_linear] / cumu_p_i[mid_idx_linear];
-                            // debugProbe[pixel_idx + debugCount] = SharedDose[pixel_idx] / cumu_p_i[pixel_idx];
-                            // debugCount += fmap_npixels;
-                    #endif
 
                     // reaches the next slice
                     if (flag)
                         break;
                 }
             }
-
-            // __syncthreads();
-            // // for debug purposes
-            // debugProbe[pixel_idx + debugCount] = SharedDose[pixel_idx] / cumu_p_i[pixel_idx];
-            // debugCount += fmap_npixels;
-            // __syncthreads();
-
-            // update global dose
             DoseBEV[global_idx + pixel_idx] += SharedDose[pixel_idx] / (cumu_p_i[pixel_idx] + eps_fastdose);
         }
     }
@@ -501,7 +481,12 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
 
     size_t fmap_npixels = beams[0].fmap_size.x * beams[0].fmap_size.y;
 
-    
+    // for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
     DoseComputeCollective(
         fmap_npixels,
         beams.size(),
@@ -512,11 +497,17 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
         kernel_h.nTheta,
         kernel_h.nPhi,
         stream
-#if XDebug || DoseDebug
+#if DoseDebug
         , outputFolder
 #endif
     );
 
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0.0f;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    std::cout << "Dose time elapsed: " << milliseconds << " [ms]"<< std::endl;
 
     // retrieve result
     size_t nVoxels = beams[0].fmap_size.x * beams[0].fmap_size.y * beams[0].long_dim;

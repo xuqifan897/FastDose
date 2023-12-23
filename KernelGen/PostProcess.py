@@ -315,8 +315,11 @@ def printKernel():
     for i in range(angles_selected):
         angleStart = angle_range * i
         angleEnd = angle_range * (i + 1)
+        A, a, B, b = exponentialKernel[i, 0], exponentialKernel[i, 1], exponentialKernel[i, 2], exponentialKernel[i, 3]
+        A *= a
+        B *= b
         line = '{:^12.4e}{:^12.4e}{:^12.4e}{:^12.4e}{:^12.4e}{:^12.4e}'.format(
-            angleStart, angleEnd, *exponentialKernel[i, :])
+            angleStart, angleEnd, A, a, B, b)
         content = content + '\n' + line
     file = os.path.join(folder, 'kernel_exp_6mv.txt')
     with open(file, 'w') as f:

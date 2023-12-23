@@ -471,6 +471,42 @@ def overlayTermaAndX():
     plt.clf()
 
 
+def debugB():
+    """
+    The exponential with B is problematic
+    """
+    localXBFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/localXB.bin"
+    localTermaFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/localTerma.bin"
+    localExpFile = "/data/qifan/projects/EndtoEnd/results/CCCSBench/localExp.bin"
+
+    localXB = np.fromfile(localXBFile, dtype=np.float32)
+    dimZ = int(localXB.size / (16*16))
+    shape = (dimZ, 16, 16)
+    localXB = np.reshape(localXB, shape)
+    localXBCenterline = localXB[:, 8, 8]
+
+    non_zero_idx = 0
+    for i in range(localXBCenterline.size):
+        if localXBCenterline[i] > 0:
+            non_zero_idx = i
+
+    localTerma = np.fromfile(localTermaFile, dtype=np.float32)
+    localTerma = np.reshape(localTerma, shape)
+    localTermaCenterline = localTerma[:, 8, 8]
+
+    localExp = np.fromfile(localExpFile, dtype=np.float32)
+    localExp = np.reshape(localExp, shape)
+    localExpCenterline = localExp[:, 8, 8]
+
+    xCoords = np.arange(non_zero_idx)
+    plt.plot(xCoords, localTermaCenterline[:non_zero_idx])
+    plt.plot(xCoords, localXBCenterline[:non_zero_idx])
+    plt.legend(['localTerma', 'localXB'])
+    file = './figures/debugB.png'
+    plt.savefig(file)
+    plt.clf()
+
+
 if __name__ == '__main__':
     # beamListGen()
     # range_check()
@@ -484,3 +520,4 @@ if __name__ == '__main__':
     # examine_X()
     examineDoseStep()
     # overlayTermaAndX()
+    # debugB()

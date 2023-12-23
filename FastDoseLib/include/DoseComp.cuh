@@ -3,9 +3,7 @@
 #include "beam.cuh"
 #include "kernel.cuh"
 
-#define XDebug false
-#define DoseDebug true
-#define ProbePixelIdx false
+#define DoseDebug false
 #define probeSize 16*16*1024
 
 namespace fastdose {
@@ -19,7 +17,7 @@ namespace fastdose {
         int nTheta,
         int nPhi,
         cudaStream_t stream
-#if XDebug || DoseDebug
+#if DoseDebug
         , const std::string outputFolder
 #endif
     );
@@ -32,7 +30,7 @@ namespace fastdose {
         float** DoseBEV_array,
         int nTheta,
         int nPhi
-#if XDebug || DoseDebug
+#if DoseDebug
         , float* debugProbe
 #endif
     );
