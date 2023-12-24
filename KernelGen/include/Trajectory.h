@@ -17,7 +17,7 @@ class G4Polyline;
 class G4AttDef;
 class G4AttValue;
 
-namespace fastdose
+namespace kernelgen
 {
     typedef std::vector<G4VTrajectoryPoint*> TrajectoryPointContainer;
 

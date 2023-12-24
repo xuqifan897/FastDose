@@ -16,11 +16,11 @@
 #include "G4PrimaryParticle.hh"
 #include "G4SystemOfUnits.hh"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-G4ThreadLocal G4Allocator<fd::Trajectory> * fd::myTrajectoryAllocator = 0;
+G4ThreadLocal G4Allocator<fdkg::Trajectory> * fdkg::myTrajectoryAllocator = 0;
 
-fd::Trajectory::Trajectory(const G4Track* aTrack)
+fdkg::Trajectory::Trajectory(const G4Track* aTrack)
 :G4VTrajectory(), fFlag(false), fInterIdx(0)
 {
     this->fParticleDefinition = aTrack->GetDefinition();
@@ -53,7 +53,7 @@ fd::Trajectory::Trajectory(const G4Track* aTrack)
     this->fGlobalTime = aTrack->GetGlobalTime();
 }
 
-fd::Trajectory::~Trajectory()
+fdkg::Trajectory::~Trajectory()
 {
     for (int i=0; i<this->fPositionRecord->size(); i++)
     {
@@ -65,7 +65,7 @@ fd::Trajectory::~Trajectory()
     delete this->fPositionRecord;
 }
 
-void fd::Trajectory::ShowTrajectory(std::ostream& os) const
+void fdkg::Trajectory::ShowTrajectory(std::ostream& os) const
 {
     os << G4endl << "TrackID = " << this->fTrackID
         << ": ParentID = " << this->fParentID << G4endl;
@@ -87,7 +87,7 @@ void fd::Trajectory::ShowTrajectory(std::ostream& os) const
     }
 }
 
-const std::map<G4String,G4AttDef>* fd::Trajectory::GetAttDefs() const
+const std::map<G4String,G4AttDef>* fdkg::Trajectory::GetAttDefs() const
 {
     G4bool isNew;
     std::map<G4String,G4AttDef>* store
@@ -128,7 +128,7 @@ const std::map<G4String,G4AttDef>* fd::Trajectory::GetAttDefs() const
     return store;
 }
 
-std::vector<G4AttValue>* fd::Trajectory::CreateAttValues() const
+std::vector<G4AttValue>* fdkg::Trajectory::CreateAttValues() const
 {
     std::vector<G4AttValue>* values = new std::vector<G4AttValue>;
 
@@ -161,7 +161,7 @@ std::vector<G4AttValue>* fd::Trajectory::CreateAttValues() const
     return values;
 }
 
-void fd::Trajectory::AppendStep(const G4Step* aStep)
+void fdkg::Trajectory::AppendStep(const G4Step* aStep)
 {
     auto* PreStepPoint = aStep->GetPreStepPoint();
     auto* PostStepPoint = aStep->GetPostStepPoint();
@@ -179,7 +179,7 @@ void fd::Trajectory::AppendStep(const G4Step* aStep)
     }
 }
 
-void fd::Trajectory::MergeTrajectory(G4VTrajectory* secondTrajectory)
+void fdkg::Trajectory::MergeTrajectory(G4VTrajectory* secondTrajectory)
 {
     if (! secondTrajectory) return;
 

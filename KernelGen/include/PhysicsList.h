@@ -7,7 +7,7 @@
 class G4VPhysicsConstructor;
 class PhysicsListMessenger;
 
-namespace fastdose {
+namespace kernelgen {
     class PhysicsList : public G4VModularPhysicsList {
     public:
         PhysicsList();

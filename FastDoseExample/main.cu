@@ -53,7 +53,9 @@ int main(int argc, char** argv) {
 #endif
 
 #if true
-    if (fd::test_DoseComputeCollective(beams_d, outputFolder, kernel_h))
+    if (fd::test_DoseComputeCollective(
+        beams_d, density_d, outputFolder,
+        example::getarg<int>("FmapOn"), kernel_h))
         return 1;
 #endif
 }

@@ -3,7 +3,7 @@
 
 #include "G4VUserActionInitialization.hh"
 
-namespace fastdose {
+namespace kernelgen {
     class ActionInitialization : public G4VUserActionInitialization {
     public:
         ActionInitialization() = default;

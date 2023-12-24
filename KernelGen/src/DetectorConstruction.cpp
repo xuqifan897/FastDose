@@ -28,9 +28,9 @@
 #include "G4PSEnergyDeposit.hh"
 #include "G4VUserDetectorConstruction.hh"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-G4VPhysicalVolume* fd::DetectorConstruction::Construct() {
+G4VPhysicalVolume* fdkg::DetectorConstruction::Construct() {
     G4NistManager* nist = G4NistManager::Instance();
     G4Material* water = nist->FindOrBuildMaterial("G4_WATER");
     G4cout << water << G4endl;
@@ -94,7 +94,7 @@ G4VPhysicalVolume* fd::DetectorConstruction::Construct() {
 }
 
 
-void fd::DetectorConstruction::ConstructSDandField() {
+void fdkg::DetectorConstruction::ConstructSDandField() {
     G4SDManager* pSDman = G4SDManager::GetSDMpointer();
     for (int i=0; i<this->SenseDetList.size(); i++) {
         G4String SDname = std::string("det") + std::to_string(i);

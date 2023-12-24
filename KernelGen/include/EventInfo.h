@@ -5,7 +5,7 @@
 #include "globals.hh"
 #include "G4SystemOfUnits.hh"
 
-namespace fastdose
+namespace kernelgen
 {
     class EventInfo : public G4VUserEventInformation
     {

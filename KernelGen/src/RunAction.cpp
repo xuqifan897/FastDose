@@ -8,19 +8,19 @@
 #include <boost/filesystem.hpp>
 
 namespace fs = boost::filesystem;
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-G4Run* fd::RunAction::GenerateRun() {
+G4Run* fdkg::RunAction::GenerateRun() {
     return new Run;
 }
 
-void fd::RunAction::BeginOfRunAction(const G4Run* aRun) {
+void fdkg::RunAction::BeginOfRunAction(const G4Run* aRun) {
     if (this->isMaster)
         G4cout << "### Run: " << aRun->GetRunID() << "starts." << G4endl;
     G4RunManager::GetRunManager()->SetRandomNumberStore(false);
 }
 
-void fd::RunAction::EndOfRunAction(const G4Run* aRun) {
+void fdkg::RunAction::EndOfRunAction(const G4Run* aRun) {
     if (this->isMaster) {
         const Run* masterRun = static_cast<const Run*>(aRun);
         std::string outputFolder = getArgKG<std::string>("outputFolder");

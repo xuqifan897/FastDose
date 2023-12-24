@@ -5,7 +5,7 @@
 #include <boost/program_options.hpp>
 #include <vector>
 
-namespace fastdose {
+namespace kernelgen {
     bool ArgsInitKernelGen(int argc, char** argv);
     extern boost::program_options::variables_map vm;
 

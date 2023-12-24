@@ -6,9 +6,9 @@
 #include "G4Event.hh"
 #include <atomic>
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-fd::Run::Run() {
+fdkg::Run::Run() {
     // Initialize HitsCollectionTable
     int heightDim = getArgKG<int>("heightDim");
     this->radiusDim = getArgKG<int>("radiusDim");
@@ -35,7 +35,7 @@ fd::Run::Run() {
     this->validCount = 0;
 }
 
-void fd::Run::RecordEvent(const G4Event* anEvent) {
+void fdkg::Run::RecordEvent(const G4Event* anEvent) {
     G4VUserEventInformation* VUserInfo = anEvent->GetUserInformation();
     EventInfo* UserInfo = static_cast<EventInfo*>(VUserInfo);
     bool IfInteraction = UserInfo->GetIfInteraction();
@@ -61,7 +61,7 @@ void fd::Run::RecordEvent(const G4Event* anEvent) {
 }
 
 
-void fd::Run::Merge(const G4Run* aRun) {
+void fdkg::Run::Merge(const G4Run* aRun) {
     const Run* bRun = static_cast<const Run*>(aRun);
     for (int i=0; i<this->kernel.size(); i++) {
         for (int j=0; j<this->radiusDim; j++) {

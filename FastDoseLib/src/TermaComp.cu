@@ -138,9 +138,9 @@ fd::d_BEV2PVCS(
 
     float2 voxel_size_at_this_point = beam_d.beamlet_size * (coords_minus_source_BEV.y / beam_d.sad);
     float3 coords_normalized {
-        coords_minus_source_BEV.x / voxel_size_at_this_point.x,
+        coords_minus_source_BEV.x / voxel_size_at_this_point.x + 0.5f * beam_d.fmap_size.x,
         (coords_minus_source_BEV.y - beam_d.lim_min) / beam_d.long_spacing,
-        coords_minus_source_BEV.z / voxel_size_at_this_point.y
+        coords_minus_source_BEV.z / voxel_size_at_this_point.y + 0.5f * beam_d.fmap_size.y
     };
     size_t pitch = PitchedArray.pitch / sizeof(float);
     float* ptr = (float*)PitchedArray.ptr;

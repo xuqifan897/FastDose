@@ -4,13 +4,13 @@
 #include "TrackingAction.h"
 #include "Trajectory.h"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-fd::TrackingAction::TrackingAction()
+fdkg::TrackingAction::TrackingAction()
 :G4UserTrackingAction()
 {;}
 
-void fd::TrackingAction::PreUserTrackingAction(const G4Track* aTrack)
+void fdkg::TrackingAction::PreUserTrackingAction(const G4Track* aTrack)
 {
     this->fpTrackingManager->SetStoreTrajectory(true);
     this->fpTrackingManager->SetTrajectory(new Trajectory(aTrack));

@@ -3,7 +3,7 @@
 
 #include "G4VTrajectoryPoint.hh"
 
-namespace fastdose
+namespace kernelgen
 {
     class TrajectoryPoint : public G4VTrajectoryPoint
     {

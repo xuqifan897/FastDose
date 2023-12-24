@@ -4,7 +4,7 @@
 #include "G4UserEventAction.hh"
 #include <atomic>
 
-namespace fastdose
+namespace kernelgen
 {
     class EventAction : public G4UserEventAction
     {

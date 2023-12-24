@@ -9,12 +9,12 @@
 #include <atomic>
 #include <iomanip>
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-std::atomic<long> fd::particleCount(0);
-std::atomic<bool> fd::logFlag(false);
+std::atomic<long> fdkg::particleCount(0);
+std::atomic<bool> fdkg::logFlag(false);
 
-fd::PrimaryGeneratorAction::PrimaryGeneratorAction() {
+fdkg::PrimaryGeneratorAction::PrimaryGeneratorAction() {
     G4int n_particle = 1;
     this->fParticleGun = new G4ParticleGun(n_particle);
 
@@ -57,11 +57,11 @@ fd::PrimaryGeneratorAction::PrimaryGeneratorAction() {
     this->logFreq = getArgKG<int>("logFreq");
 }
 
-fd::PrimaryGeneratorAction::~PrimaryGeneratorAction() {
+fdkg::PrimaryGeneratorAction::~PrimaryGeneratorAction() {
     delete this->fParticleGun;
 }
 
-void fd::PrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
+void fdkg::PrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
     long particleIdx = particleCount.fetch_add(1);
     // determine the particle energy
     float energy = 0.;

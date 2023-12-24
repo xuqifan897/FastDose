@@ -6,25 +6,25 @@
 #include "PhysicsList.h"
 #include "ActionInitialization.h"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
 int main(int argc, char** argv) {
-    if(fd::ArgsInitKernelGen(argc, argv))
+    if(fdkg::ArgsInitKernelGen(argc, argv))
         return 0;
 
     auto* runManager = G4RunManagerFactory::CreateRunManager();
     
     G4Random::setTheSeed(std::time(nullptr));
 
-    runManager->SetUserInitialization(new fd::DetectorConstruction);
+    runManager->SetUserInitialization(new fdkg::DetectorConstruction);
 
-    runManager->SetUserInitialization(new fd::PhysicsList);
+    runManager->SetUserInitialization(new fdkg::PhysicsList);
 
-    runManager->SetUserInitialization(new fd::ActionInitialization);
+    runManager->SetUserInitialization(new fdkg::ActionInitialization);
 
     runManager->Initialize();
 
-    int nParticles = fd::getArgKG<int>("nParticles");
+    int nParticles = fdkg::getArgKG<int>("nParticles");
     runManager->BeamOn(nParticles);
 
     delete runManager;

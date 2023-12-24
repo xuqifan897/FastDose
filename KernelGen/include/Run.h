@@ -9,7 +9,7 @@
 #include "G4THitsMap.hh"
 #include "RunAction.h"
 
-namespace fastdose {
+namespace kernelgen {
     class Run : public G4Run
     {
     public:

@@ -5,7 +5,7 @@
 #include "G4ParticleGun.hh"
 #include <atomic>
 
-namespace fastdose {
+namespace kernelgen {
     class PrimaryGeneratorAction : public G4VUserPrimaryGeneratorAction {
     public:
         PrimaryGeneratorAction();

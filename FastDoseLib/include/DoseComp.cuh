@@ -3,7 +3,6 @@
 #include "beam.cuh"
 #include "kernel.cuh"
 
-#define DoseDebug false
 #define probeSize 16*16*1024
 
 namespace fastdose {
@@ -17,9 +16,6 @@ namespace fastdose {
         int nTheta,
         int nPhi,
         cudaStream_t stream
-#if DoseDebug
-        , const std::string outputFolder
-#endif
     );
 
     __global__ void
@@ -30,13 +26,12 @@ namespace fastdose {
         float** DoseBEV_array,
         int nTheta,
         int nPhi
-#if DoseDebug
-        , float* debugProbe
-#endif
     );
 
-    bool test_DoseComputeCollective(std::vector<BEAM_d>& beams,
-        const std::string& outputFolder, const KERNEL_h& kernel_h, cudaStream_t stream=0);
+    bool test_DoseComputeCollective(
+        std::vector<BEAM_d>& beams, DENSITY_d& density_d,
+        const std::string& outputFolder, int FmapOn,
+        const KERNEL_h& kernel_h, cudaStream_t stream=0);
 }
 
 #endif

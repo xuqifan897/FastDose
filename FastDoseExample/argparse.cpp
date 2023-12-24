@@ -32,8 +32,13 @@ bool example::argparse(int argc, char** argv) {
         
         // dose calculation
         ("nPhi", po::value<int>()->default_value(8),
-            "number of phi angles in convolution");
+            "number of phi angles in convolution")
         
+        // for the purpose of slab dose calculation benchmarking
+        ("FmapOn", po::value<int>()->default_value(2),
+            "To initialize the fluence map of the 0-th beam, representing the"
+            "dimension of the fluence map that is on");
+
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);
 

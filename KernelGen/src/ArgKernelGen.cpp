@@ -8,14 +8,14 @@
 #include <fstream>
 #include <boost/program_options.hpp>
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 namespace po = boost::program_options;
 
-std::vector<std::pair<float, float>> fd::spectrum;
+std::vector<std::pair<float, float>> fdkg::spectrum;
 
-po::variables_map fd::vm;
+po::variables_map fdkg::vm;
 
-bool fd::ArgsInitKernelGen(int argc, char** argv) {
+bool fdkg::ArgsInitKernelGen(int argc, char** argv) {
     po::options_description desc(
         "The options for kernel generation"
     );
@@ -71,7 +71,7 @@ bool fd::ArgsInitKernelGen(int argc, char** argv) {
     return 0;
 }
 
-bool fd::ReadSpectrum() {
+bool fdkg::ReadSpectrum() {
     const auto & SpectrumFile = getArgKG<std::string>("spectrumFile");
     std::ifstream f(SpectrumFile);
     if (! f) {

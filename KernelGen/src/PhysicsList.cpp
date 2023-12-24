@@ -24,9 +24,9 @@
 
 #include "PhysicsList.h"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-fd::PhysicsList::PhysicsList() : G4VModularPhysicsList()
+fdkg::PhysicsList::PhysicsList() : G4VModularPhysicsList()
 {
     
     // EM physics
@@ -43,14 +43,14 @@ fd::PhysicsList::PhysicsList() : G4VModularPhysicsList()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-fd::PhysicsList::~PhysicsList()
+fdkg::PhysicsList::~PhysicsList()
 {
     delete fEmPhysicsList;
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void fd::PhysicsList::ConstructParticle()
+void fdkg::PhysicsList::ConstructParticle()
 {
     // minimal set of particles for EM physics
     G4EmBuilder::ConstructMinimalEmSet();
@@ -58,7 +58,7 @@ void fd::PhysicsList::ConstructParticle()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void fd::PhysicsList::ConstructProcess()
+void fdkg::PhysicsList::ConstructProcess()
 {
     AddTransportation();
     fEmPhysicsList->ConstructProcess();
@@ -68,7 +68,7 @@ void fd::PhysicsList::ConstructProcess()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void fd::PhysicsList::AddDecay()
+void fdkg::PhysicsList::AddDecay()
 {
     // Add Decay Process
     
@@ -95,10 +95,10 @@ void fd::PhysicsList::AddDecay()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void fd::PhysicsList::AddStepMax()
+void fdkg::PhysicsList::AddStepMax()
 {
     // Step limitation seen as a process
-    fd::StepMax* stepMaxProcess = new fd::StepMax();
+    fdkg::StepMax* stepMaxProcess = new fdkg::StepMax();
     
     auto particleIterator=GetParticleIterator();
     particleIterator->reset();
@@ -115,10 +115,10 @@ void fd::PhysicsList::AddStepMax()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void fd::PhysicsList::AddPhysicsList(const G4String& name)
+void fdkg::PhysicsList::AddPhysicsList(const G4String& name)
 {
     if (verboseLevel>-1) {
-        G4cout << "fd::PhysicsList::AddPhysicsList: <" << name << ">" << G4endl;
+        G4cout << "fdkg::PhysicsList::AddPhysicsList: <" << name << ">" << G4endl;
     }
     
     if (name == fEmName) return;

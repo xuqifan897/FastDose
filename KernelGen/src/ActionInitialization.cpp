@@ -4,13 +4,13 @@
 #include "EventAction.h"
 #include "TrackingAction.h"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-void fd::ActionInitialization::BuildForMaster() const {
+void fdkg::ActionInitialization::BuildForMaster() const {
     SetUserAction(new RunAction);
 }
 
-void fd::ActionInitialization::Build() const {
+void fdkg::ActionInitialization::Build() const {
     SetUserAction(new RunAction);
     SetUserAction(new PrimaryGeneratorAction);
     SetUserAction(new EventAction);

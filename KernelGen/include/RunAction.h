@@ -6,7 +6,7 @@
 
 class G4Run;
 
-namespace fastdose {
+namespace kernelgen {
     class RunAction : public G4UserRunAction {
     public:
         RunAction() = default;

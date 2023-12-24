@@ -8,7 +8,7 @@
 
 class StepMaxMessenger;
 
-namespace fastdose {
+namespace kernelgen {
     class StepMax : public G4VDiscreteProcess
     {
     public:

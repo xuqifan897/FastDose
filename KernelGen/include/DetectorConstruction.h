@@ -3,7 +3,7 @@
 
 #include "G4VUserDetectorConstruction.hh"
 
-namespace fastdose {
+namespace kernelgen {
     class DetectorConstruction : public G4VUserDetectorConstruction {
     public:
         DetectorConstruction() = default;

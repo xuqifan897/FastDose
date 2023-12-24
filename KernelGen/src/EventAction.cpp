@@ -7,9 +7,9 @@
 #include "G4Event.hh"
 #include "EventInfo.h"
 
-namespace fd = fastdose;
+ namespace fdkg = kernelgen;
 
-fd::EventAction::EventAction() {
+fdkg::EventAction::EventAction() {
     int heightDim = getArgKG<int>("heightDim");
     float heightRes = getArgKG<float>("heightRes") * cm;
 
@@ -19,7 +19,7 @@ fd::EventAction::EventAction() {
     this->ZHead = (heightDim - 2 * marginHead) * heightRes;
 }
 
-void fd::EventAction::EndOfEventAction(const G4Event* evt) {
+void fdkg::EventAction::EndOfEventAction(const G4Event* evt) {
     G4TrajectoryContainer* trajectoryContainer = evt->GetTrajectoryContainer();
     int n_trajectories = 0;
     if (trajectoryContainer)

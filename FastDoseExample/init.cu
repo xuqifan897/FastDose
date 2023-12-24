@@ -112,6 +112,23 @@ bool example::beamsInit(
             last_beam.angles.x = 0.0f;
             last_beam.angles.y = 0.0f;
             last_beam.angles.z = 0.0f;
+
+            // initialize the fluence map
+            int FmapOn = getarg<int>("FmapOn");
+            if (FmapOn % 2 != 0) {
+                std::cerr << "The variable FmapOn is required to be even, "
+                    "but has the value" << FmapOn << std::endl;
+                return 1;
+            }
+            int FmapLeadingX = static_cast<int>((last_beam.fmap_size.x - FmapOn)/2);
+            int FmapLeadingY = static_cast<int>((last_beam.fmap_size.y - FmapOn)/2);
+            std::fill(last_beam.fluence.begin(), last_beam.fluence.end(), 0.);
+            for (int j=FmapLeadingY; j<FmapLeadingY+FmapOn; j++) {
+                for (int i=FmapLeadingX; i<FmapLeadingX+FmapOn; i++) {
+                    int beamletIdx = i + j * last_beam.fmap_size.x;
+                    last_beam.fluence[beamletIdx] = 1.;
+                }
+            }
             firstBeam = false;
         }
 

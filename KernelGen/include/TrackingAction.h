@@ -3,7 +3,7 @@
 
 #include "G4UserTrackingAction.hh"
 
-namespace fastdose {
+namespace kernelgen {
     class TrackingAction : public G4UserTrackingAction {
     public:
         TrackingAction();

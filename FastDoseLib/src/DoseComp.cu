@@ -179,9 +179,6 @@ bool fastdose::DoseComputeCollective(
     int nTheta,
     int nPhi,
     cudaStream_t stream
-#if DoseDebug
-    , const std::string outputFolder
-#endif
 ) {
     dim3 blockSize(1, 1, 1);
     blockSize.x = ((fmap_npixels + WARPSIZE - 1) / WARPSIZE) * WARPSIZE;
@@ -198,20 +195,6 @@ bool fastdose::DoseComputeCollective(
     //        ray originating from the base voxel (times the number of phi angles)
     int sharedMemorySize = (1 + 1 + 1 + 1 + 2 * nPhi) * fmap_npixels * sizeof(float)
         + nPhi * sizeof(float3) + nPhi * sizeof(float3);
-#if DoseDebug
-    float* debugProbe;
-    checkCudaErrors(cudaMalloc((void**)&debugProbe, probeSize*sizeof(float)));
-    checkCudaErrors(cudaMemset(debugProbe, 0., probeSize*sizeof(float)));
-    d_DoseComputeCollective<<<gridSize, blockSize, sharedMemorySize, stream>>>(
-        d_beams,
-        TermaBEV_array,
-        DensityBEV_array,
-        DoseBEV_array,
-        1,
-        1,
-        debugProbe
-    );
-#else
     d_DoseComputeCollective<<<gridSize, blockSize, sharedMemorySize, stream>>>(
         d_beams,
         TermaBEV_array,
@@ -220,18 +203,6 @@ bool fastdose::DoseComputeCollective(
         nTheta,
         nPhi
     );
-#endif
-
-#if DoseDebug
-    std::vector<float> h_debugProbe(probeSize);
-    checkCudaErrors(cudaMemcpy(h_debugProbe.data(), debugProbe,
-        probeSize*sizeof(float), cudaMemcpyDeviceToHost));
-    fs::path debugFile(outputFolder);
-    debugFile /= std::string("DoseDebug.bin");
-    std::ofstream f(debugFile.string());
-    f.write((char*)(h_debugProbe.data()), probeSize*sizeof(float));
-    checkCudaErrors(cudaFree(debugProbe));
-#endif
     return 0;
 }
 
@@ -244,9 +215,6 @@ fastdose::d_DoseComputeCollective(
     float** DoseBEV_array,
     int nTheta,
     int nPhi
-#if DoseDebug
-    , float* debugProbe
-#endif
 ) {
     int beam_idx = blockIdx.x;
     d_BEAM_d beam = beams[beam_idx];
@@ -283,10 +251,6 @@ fastdose::d_DoseComputeCollective(
     auto block = cooperative_groups::this_thread_block();
     // Here we assume beam.TermaBEV_pitch == beam.DoseBEV_pitch == beam.DensityBEV_pitch
     size_t pitch_float = beam.TermaBEV_pitch / sizeof(float);
-
-    #if DoseDebug
-        size_t debugCount = 0;
-    #endif
 
     for (int thetaIdx=0; thetaIdx<nTheta; thetaIdx++) {
         float thetaAngle = d_theta[thetaIdx];
@@ -405,14 +369,6 @@ fastdose::d_DoseComputeCollective(
                         SharedXB_local[pixel_idx] = 0.0f;
                     }
 
-                    #if DoseDebug
-                    if (beam_idx == 0) {
-                        // debugProbe[debugCount + mid_idx_linear] = exp_minus_bp_i;
-                        debugProbe[debugCount + pixel_idx] = localXB;
-                        debugCount += fmap_npixels;
-                    }
-                    #endif
-
                     // update baseCoords_local
                     if (pixel_idx == 0)
                         baseCoords_local = np;
@@ -429,8 +385,10 @@ fastdose::d_DoseComputeCollective(
 }
 
 
-bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
-        const std::string& outputFolder, const KERNEL_h& kernel_h, cudaStream_t stream
+bool fastdose::test_DoseComputeCollective(
+    std::vector<BEAM_d>& beams, DENSITY_d& density_d,
+    const std::string& outputFolder, int FmapOn,
+    const KERNEL_h& kernel_h, cudaStream_t stream
 ) {
     // copy beams
     std::vector<d_BEAM_d> h_beams;
@@ -497,9 +455,6 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
         kernel_h.nTheta,
         kernel_h.nPhi,
         stream
-#if DoseDebug
-        , outputFolder
-#endif
     );
 
     cudaEventRecord(stop);
@@ -518,7 +473,8 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
         beams[0].DoseBEV, beams[0].DoseBEV_pitch,
         pitch_host*sizeof(float), beams[0].long_dim, cudaMemcpyDeviceToHost));
     
-    fs::path DoseFile = fs::path(outputFolder) / std::string("DoseBEV.bin");
+    fs::path DoseFile = fs::path(outputFolder) /
+        (std::string("DoseBEVFmap") + std::to_string(FmapOn) + std::string(".bin"));
     std::ofstream f(DoseFile.string());
     if (! f.is_open()) {
         std::cerr << "Could not open file: " << DoseFile.string() << std::endl;
@@ -532,5 +488,73 @@ bool fastdose::test_DoseComputeCollective(std::vector<BEAM_d>& beams,
     checkCudaErrors(cudaFree(TermaBEV_array));
     checkCudaErrors(cudaFree(DenseBEV_array));
     checkCudaErrors(cudaFree(DoseBEV_array));
+
+
+    // transfer BEV to PVCS. Construct texture memory first
+    cudaArray* DoseBEV_Arr;
+    cudaTextureObject_t DoseBEV_Tex;
+    cudaExtent volumeSize = make_cudaExtent(
+        beams[0].fmap_size.x, beams[0].fmap_size.y, beams[0].long_dim);
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+    checkCudaErrors(cudaMalloc3DArray(&DoseBEV_Arr, &channelDesc, volumeSize));
+
+    cudaMemcpy3DParms copyParams = {0};
+    copyParams.srcPtr = 
+        make_cudaPitchedPtr(DoseBEV_example.data(),
+            beams[0].fmap_size.x * sizeof(float),
+            beams[0].fmap_size.x, beams[0].fmap_size.y);
+    copyParams.dstArray = DoseBEV_Arr;
+    copyParams.extent = volumeSize;
+    copyParams.kind = cudaMemcpyHostToDevice;
+    checkCudaErrors(cudaMemcpy3D(&copyParams));
+
+    cudaResourceDesc texRes;
+    memset(&texRes, 0, sizeof(cudaResourceDesc));
+    texRes.resType = cudaResourceTypeArray;
+    texRes.res.array.array = DoseBEV_Arr;
+
+    cudaTextureDesc texDescr;
+    memset(&texDescr, 0, sizeof(cudaTextureDesc));
+    texDescr.normalizedCoords = false;
+    texDescr.filterMode = cudaFilterModeLinear;
+    texDescr.addressMode[0] = cudaAddressModeBorder;
+    texDescr.addressMode[1] = cudaAddressModeBorder;
+    texDescr.addressMode[2] = cudaAddressModeBorder;
+    texDescr.readMode = cudaReadModeElementType;
+    checkCudaErrors(cudaCreateTextureObject(&DoseBEV_Tex, &texRes, &texDescr, NULL));
+
+    // Construct destination array
+    cudaExtent DosePVCS_Arr_extent = make_cudaExtent(
+        density_d.VolumeDim.x * sizeof(float),
+        density_d.VolumeDim.y, density_d.VolumeDim.z);
+    cudaPitchedPtr DosePVCS_Arr;
+    checkCudaErrors(cudaMalloc3D(&DosePVCS_Arr, DosePVCS_Arr_extent));
+
+    std::cout << "beams[0] angles: " << beams[0].angles << std::endl;
+    std::cout << "beams[0] source: " << beams[0].source << std::endl;
+    BEV2PVCS(beams[0], density_d, DosePVCS_Arr, DoseBEV_Tex, stream);
+
+    // write result
+    size_t pitchedVolume = DosePVCS_Arr.pitch / sizeof(float) * 
+        density_d.VolumeDim.y * density_d.VolumeDim.z;
+    size_t volume = density_d.VolumeDim.x * density_d.VolumeDim.y *
+        density_d.VolumeDim.z;
+    std::vector<float> DosePVCS_pitched(pitchedVolume);
+    std::vector<float> DosePVCS(volume);
+    checkCudaErrors(cudaMemcpy(DosePVCS_pitched.data(), DosePVCS_Arr.ptr,
+        pitchedVolume*sizeof(float), cudaMemcpyDeviceToHost));
+    pitched2contiguous(DosePVCS, DosePVCS_pitched,
+        density_d.VolumeDim.x, density_d.VolumeDim.y, density_d.VolumeDim.z,
+        DosePVCS_Arr.pitch / sizeof(float));
+    fs::path DosePVCSFile = fs::path(outputFolder) /
+        (std::string("DosePVCSFmap") + std::to_string(FmapOn) + std::string(".bin"));
+    f.open(DosePVCSFile.string());
+    if (! f.is_open()) {
+        std::cerr << "Could not open file " << DosePVCSFile.string() << std::endl;
+        return 1;
+    }
+    f.write((char*)DosePVCS.data(), volume*sizeof(float));
+    f.close();
+
     return 0;
 }
