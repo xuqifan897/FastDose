@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 def viewDoseBEV():
     dataFolder = "/data/qifan/projects/EndtoEnd/results/CCCSslab"
     for FmapOn in [2, 4, 8, 16]:
-        resZ = 0.25  # cm
+        resZ = 0.08  # cm
         fluence_dim = (16, 16)
         DoseBEVFile = os.path.join(dataFolder, 'DoseBEVFmap{}.bin'.format(FmapOn))
         DoseBEV = np.fromfile(DoseBEVFile, dtype=np.float32)

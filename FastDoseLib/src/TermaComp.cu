@@ -210,8 +210,12 @@ fd::d_TermaComputeCollective(
         (beam.long_spacing / (beam.sad * SUPER_SAMPLING));
     float step_size_norm = length(step_size_PVCS);   // physical length
 
+    // for inverse square
+    float SXD = beam.lim_min / beam.sad;  // source-to-x distance, normalized by SAD, unitless
+    float SXD_step_size = beam.long_spacing / (beam.sad * SUPER_SAMPLING);
+
     // initialize to starting point
-    float3 coords_PVCS = beam.source + pixel_center_minus_source_PVCS * (beam.lim_min / beam.sad);
+    float3 coords_PVCS = beam.source + pixel_center_minus_source_PVCS * SXD;
 
     float3 step_size_PVCS_normalized = step_size_PVCS / voxel_size;
     float3 coords_PVCS_normalized = coords_PVCS / voxel_size;
@@ -236,7 +240,9 @@ fd::d_TermaComputeCollective(
                 terma_local += this_fluence * this_energy * this_mu *
                     __expf(- this_mu * radiological_path_length);
             }
-            terma_avg += terma_local;
+            // for inverse square
+            SXD += SXD_step_size;
+            terma_avg += terma_local / (SXD * SXD);
         }
         terma_avg /= SUPER_SAMPLING;
         density_avg /= SUPER_SAMPLING;

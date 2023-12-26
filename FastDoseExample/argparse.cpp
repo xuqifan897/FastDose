@@ -37,7 +37,9 @@ bool example::argparse(int argc, char** argv) {
         // for the purpose of slab dose calculation benchmarking
         ("FmapOn", po::value<int>()->default_value(2),
             "To initialize the fluence map of the 0-th beam, representing the"
-            "dimension of the fluence map that is on");
+            "dimension of the fluence map that is on")
+        ("beamletSize", po::value<float>()->default_value(0.25f),
+            "The beamlet size of the fluence. To override that in the beamlist");
 
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);

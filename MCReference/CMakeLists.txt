@@ -21,4 +21,4 @@ endif()
 
 include(${Geant4_USE_FILE})
 target_include_directories(MCReference PRIVATE ${Geant4_INCLUDE_DIR})
-target_link_libraries(MCReference ${Geant4_LIBRARIES})
+target_link_libraries(MCReference PRIVATE ${Geant4_LIBRARIES})

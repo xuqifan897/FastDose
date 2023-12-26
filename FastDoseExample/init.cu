@@ -112,6 +112,9 @@ bool example::beamsInit(
             last_beam.angles.x = 0.0f;
             last_beam.angles.y = 0.0f;
             last_beam.angles.z = 0.0f;
+            
+            last_beam.beamlet_size.x = getarg<float>("beamletSize");
+            last_beam.beamlet_size.y = getarg<float>("beamletSize");
 
             // initialize the fluence map
             int FmapOn = getarg<int>("FmapOn");
