@@ -1,5 +1,5 @@
-#ifndef __PHYSICSLISTMCREF_H__
-#define __PHYSICSLISTMCREF_H__
+#ifndef PhysicsListBS_h
+#define PhysicsListBS_h 1
 
 #include "G4VModularPhysicsList.hh"
 #include "globals.hh"
@@ -9,7 +9,7 @@ class PhysicsListMessenger;
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-namespace MCRef
+namespace bs
 {
     class PhysicsList: public G4VModularPhysicsList
     {
@@ -34,4 +34,5 @@ namespace MCRef
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
 #endif

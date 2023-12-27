@@ -1,30 +1,30 @@
-#include "StepMaxMCRef.h"
+#include "StepMaxBS.h"
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-MCRef::StepMax::StepMax(const G4String& processName)
+bs::StepMax::StepMax(const G4String& processName)
 : G4VDiscreteProcess(processName), fMaxChargedStep(DBL_MAX)
 {
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-MCRef::StepMax::~StepMax() {}
+bs::StepMax::~StepMax() {}
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-G4bool MCRef::StepMax::IsApplicable(const G4ParticleDefinition& particle)
+G4bool bs::StepMax::IsApplicable(const G4ParticleDefinition& particle)
 {
     return (particle.GetPDGCharge() != 0.);
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void MCRef::StepMax::SetMaxStep(G4double step) {fMaxChargedStep = step;}
+void bs::StepMax::SetMaxStep(G4double step) {fMaxChargedStep = step;}
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-G4double MCRef::StepMax::PostStepGetPhysicalInteractionLength(const G4Track&,
+G4double bs::StepMax::PostStepGetPhysicalInteractionLength(const G4Track&,
                                                        G4double,
                                                        G4ForceCondition* condition )
 {
@@ -40,7 +40,7 @@ G4double MCRef::StepMax::PostStepGetPhysicalInteractionLength(const G4Track&,
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-G4VParticleChange* MCRef::StepMax::PostStepDoIt(const G4Track& aTrack, const G4Step&)
+G4VParticleChange* bs::StepMax::PostStepDoIt(const G4Track& aTrack, const G4Step&)
 {
     // do nothing
     aParticleChange.Initialize(aTrack);

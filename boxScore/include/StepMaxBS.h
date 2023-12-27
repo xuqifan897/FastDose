@@ -1,5 +1,5 @@
-#ifndef __STEPMAXMCREF_H__
-#define __STEPMAXMCREF_H__
+#ifndef StepMaxBS_h
+#define StepMaxBS_h 1
 
 #include "globals.hh"
 #include "G4VDiscreteProcess.hh"
@@ -10,7 +10,7 @@ class StepMaxMessenger;
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-namespace MCRef
+namespace bs
 {
     class StepMax : public G4VDiscreteProcess
     {

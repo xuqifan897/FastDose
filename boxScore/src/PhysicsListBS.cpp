@@ -12,17 +12,20 @@
 
 #include "G4LossTableManager.hh"
 #include "G4UnitsTable.hh"
+
 #include "G4ParticleDefinition.hh"
 #include "G4ProcessManager.hh"
 #include "G4EmBuilder.hh"
+
 #include "G4Decay.hh"
-#include "StepMaxMCRef.h"
+#include "StepMaxBS.h"
+
 #include "G4SystemOfUnits.hh"
 
-#include "PhysicsListMCRef.h"
+#include "PhysicsListBS.h"
 
 
-MCRef::PhysicsList::PhysicsList() : G4VModularPhysicsList()
+bs::PhysicsList::PhysicsList() : G4VModularPhysicsList()
 {
     
     // EM physics
@@ -39,14 +42,14 @@ MCRef::PhysicsList::PhysicsList() : G4VModularPhysicsList()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-MCRef::PhysicsList::~PhysicsList()
+bs::PhysicsList::~PhysicsList()
 {
     delete fEmPhysicsList;
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void MCRef::PhysicsList::ConstructParticle()
+void bs::PhysicsList::ConstructParticle()
 {
     // minimal set of particles for EM physics
     G4EmBuilder::ConstructMinimalEmSet();
@@ -54,7 +57,7 @@ void MCRef::PhysicsList::ConstructParticle()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void MCRef::PhysicsList::ConstructProcess()
+void bs::PhysicsList::ConstructProcess()
 {
     AddTransportation();
     fEmPhysicsList->ConstructProcess();
@@ -64,7 +67,7 @@ void MCRef::PhysicsList::ConstructProcess()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void MCRef::PhysicsList::AddDecay()
+void bs::PhysicsList::AddDecay()
 {
     // Add Decay Process
     
@@ -91,10 +94,10 @@ void MCRef::PhysicsList::AddDecay()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void MCRef::PhysicsList::AddStepMax()
+void bs::PhysicsList::AddStepMax()
 {
     // Step limitation seen as a process
-    StepMax* stepMaxProcess = new MCRef::StepMax();
+    StepMax* stepMaxProcess = new bs::StepMax();
     
     auto particleIterator=GetParticleIterator();
     particleIterator->reset();
@@ -111,10 +114,10 @@ void MCRef::PhysicsList::AddStepMax()
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
-void MCRef::PhysicsList::AddPhysicsList(const G4String& name)
+void bs::PhysicsList::AddPhysicsList(const G4String& name)
 {
     if (verboseLevel>-1) {
-        G4cout << "MCRef::PhysicsList::AddPhysicsList: <" << name << ">" << G4endl;
+        G4cout << "bs::PhysicsList::AddPhysicsList: <" << name << ">" << G4endl;
     }
     
     if (name == fEmName) return;
