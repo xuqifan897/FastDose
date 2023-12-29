@@ -138,6 +138,10 @@ bool example::beamsInit(
         last_beam.calc_range(density_h);
     }
 
+    // show some of the beams
+    for (int i=0; i<10; i++)
+        std::cout << beams_h[i] << std::endl;
+
     beams_d.resize(beams_h.size());
     for (int i=0; i<beams_d.size(); i++) {
         if (fd::beam_h2d(beams_h[i], beams_d[i]))
@@ -159,7 +163,7 @@ bool example::specInit(fastdose::SPECTRUM_h& spectrum_h) {
         return 1;
     if(spectrum_h.bind_spectrum())
         return 1;
-#if false
+#if true
     fd::test_spectrum(spectrum_h);
 #endif
     return 0;

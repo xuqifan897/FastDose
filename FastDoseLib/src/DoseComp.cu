@@ -14,12 +14,12 @@
 namespace fs = boost::filesystem;
 
 namespace fastdose {
-    __constant__ float d_paramA[MAX_THETA_ANGLES];
-    __constant__ float d_parama[MAX_THETA_ANGLES];
-    __constant__ float d_paramB[MAX_THETA_ANGLES];
-    __constant__ float d_paramb[MAX_THETA_ANGLES];
-    __constant__ float d_theta[MAX_THETA_ANGLES];
-    __constant__ float d_phi[MAX_THETA_ANGLES];
+    float* d_paramA;
+    float* d_parama;
+    float* d_paramB;
+    float* d_paramb;
+    float* d_theta;
+    float* d_phi;
 }
 
 bool fastdose::KERNEL_h::bind_kernel() {
@@ -28,33 +28,63 @@ bool fastdose::KERNEL_h::bind_kernel() {
             << MAX_THETA_ANGLES << ")" << std::endl;
         return 1;
     }
-    checkCudaErrors(cudaMemcpyToSymbol(d_paramA, this->paramA.data(), this->nTheta*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_parama, this->parama.data(), this->nTheta*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_paramB, this->paramB.data(), this->nTheta*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_paramb, this->paramb.data(), this->nTheta*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_theta, this->thetaMiddle.data(), this->nTheta*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_phi, this->phiAngles.data(), this->nPhi*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_paramA), this->nTheta*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_parama), this->nTheta*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_paramB), this->nTheta*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_paramb), this->nTheta*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_theta), this->nTheta*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_phi), this->nPhi*sizeof(float)));
+
+    checkCudaErrors(cudaMemcpy(d_paramA, this->paramA.data(),
+        this->paramA.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_parama, this->parama.data(),
+        this->parama.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_paramB, this->paramB.data(),
+        this->paramB.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_paramb, this->paramb.data(),
+        this->paramb.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_theta, this->thetaMiddle.data(),
+        this->thetaMiddle.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_phi, this->phiAngles.data(),
+        this->phiAngles.size()*sizeof(float), cudaMemcpyHostToDevice));
+
     return 0;
 }
 
-__global__ void
-fastdose::d_test_kernel(float* output, int width, int idx) {
-    int ii = threadIdx.x;
-    if (ii >= width)
-        return;
-    if (idx == 0) {
-        output[ii] = d_paramA[ii];
-    } else if (idx == 1) {
-        output[ii] = d_parama[ii];
-    } else if (idx == 2) {
-        output[ii] = d_paramB[ii];
-    } else if (idx == 3) {
-        output[ii] = d_paramb[ii];
-    } else if (idx == 4) {
-        output[ii] = d_theta[ii];
-    } else if (idx == 5) {
-        output[ii] = d_phi[ii];
+
+void fastdose::test_kernel(const KERNEL_h& kernel_h) {
+    std::vector<float> paramA_samples(kernel_h.nTheta);
+    std::vector<float> parama_samples(kernel_h.nTheta);
+    std::vector<float> paramB_samples(kernel_h.nTheta);
+    std::vector<float> paramb_samples(kernel_h.nTheta);
+    std::vector<float> theta_samples(kernel_h.nTheta);
+    std::vector<float> phi_samples(kernel_h.nPhi);
+
+    checkCudaErrors(cudaMemcpy(paramA_samples.data(), d_paramA,
+        kernel_h.nTheta*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(parama_samples.data(), d_parama,
+        kernel_h.nTheta*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(paramB_samples.data(), d_paramB,
+        kernel_h.nTheta*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(paramb_samples.data(), d_paramb,
+        kernel_h.nTheta*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(theta_samples.data(), d_theta,
+        kernel_h.nTheta*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(phi_samples.data(), d_phi,
+        kernel_h.nPhi*sizeof(float), cudaMemcpyDeviceToHost));
+    
+    double absolute_diff = 0.;
+    for (int i=0; i<kernel_h.nTheta; i++) {
+        absolute_diff += abs(kernel_h.paramA[i] - paramA_samples[i]);
+        absolute_diff += abs(kernel_h.parama[i] - parama_samples[i]);
+        absolute_diff += abs(kernel_h.paramB[i] - paramB_samples[i]);
+        absolute_diff += abs(kernel_h.paramb[i] - paramb_samples[i]);
+        absolute_diff += abs(kernel_h.thetaMiddle[i] - theta_samples[i]);
     }
+    for (int i=0; i<kernel_h.nPhi; i++) {
+        absolute_diff += abs(kernel_h.phiAngles[i] - phi_samples[i]);
+    }
+    std::cout << "Absolute difference: " << absolute_diff << std::endl << std::endl;
 }
 
 
@@ -201,7 +231,15 @@ bool fastdose::DoseComputeCollective(
         DensityBEV_array,
         DoseBEV_array,
         nTheta,
-        nPhi
+        nPhi,
+
+        // kernel information
+        d_paramA,
+        d_parama,
+        d_paramB,
+        d_paramb,
+        d_theta,
+        d_phi
     );
     return 0;
 }
@@ -214,7 +252,15 @@ fastdose::d_DoseComputeCollective(
     float** DensityBEV_array,
     float** DoseBEV_array,
     int nTheta,
-    int nPhi
+    int nPhi,
+
+    // kernel information
+    float* d_paramA_device,
+    float* d_parama_device,
+    float* d_paramB_device,
+    float* d_paramb_device,
+    float* d_theta_device,
+    float* d_phi_device
 ) {
     int beam_idx = blockIdx.x;
     d_BEAM_d beam = beams[beam_idx];
@@ -253,15 +299,15 @@ fastdose::d_DoseComputeCollective(
     size_t pitch_float = beam.TermaBEV_pitch / sizeof(float);
 
     for (int thetaIdx=0; thetaIdx<nTheta; thetaIdx++) {
-        float thetaAngle = d_theta[thetaIdx];
+        float thetaAngle = d_theta_device[thetaIdx];
         // for now, we only consider forward scattering
         if (thetaAngle > CUDART_PIO2)
             continue;
 
-        float A = d_paramA[thetaIdx];
-        float a = d_parama[thetaIdx];
-        float B = d_paramB[thetaIdx];
-        float b = d_paramb[thetaIdx];
+        float A = d_paramA_device[thetaIdx];
+        float a = d_parama_device[thetaIdx];
+        float B = d_paramB_device[thetaIdx];
+        float b = d_paramb_device[thetaIdx];
 
         // Initialize SharedX
         for (int phiIdx=0; phiIdx<nPhi; phiIdx++) {
@@ -272,7 +318,7 @@ fastdose::d_DoseComputeCollective(
         // Initialize directions
         if (pixel_idx < nPhi) {
             // physical direction
-            directions[pixel_idx] = d_angle2Vector(thetaAngle, d_phi[pixel_idx]);
+            directions[pixel_idx] = d_angle2Vector(thetaAngle, d_phi_device[pixel_idx]);
             // convert physical direction to normalized direction w.r.t. voxel size
             directions[pixel_idx] = make_float3(
                 directions[pixel_idx].x / beam.beamlet_size.x,

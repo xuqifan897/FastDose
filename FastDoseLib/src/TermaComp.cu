@@ -6,10 +6,10 @@
 namespace fs = boost::filesystem;
 
 namespace fastdose{
-    __constant__ float d_energy[MAX_KERNEL_NUM];
-    __constant__ float d_fluence[MAX_KERNEL_NUM];
-    __constant__ float d_mu[MAX_KERNEL_NUM];
-    __constant__ float d_mu_en[MAX_KERNEL_NUM];
+    float* d_energy;
+    float* d_fluence;
+    float* d_mu;
+    float* d_mu_en;
 
     static __device__ float3 d_rotateAroundAxisAtOriginRHS(
         const float3& p, const float3& r, const float& t
@@ -70,27 +70,48 @@ bool fd::SPECTRUM_h::bind_spectrum() {
             << MAX_KERNEL_NUM << ")" << std::endl;
         return 1;
     }
-    checkCudaErrors(cudaMemcpyToSymbol(d_energy, this->energy.data(), this->nkernels*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_fluence, this->fluence.data(), this->nkernels*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_mu, this->mu.data(), this->nkernels*sizeof(float)));
-    checkCudaErrors(cudaMemcpyToSymbol(d_mu_en, this->mu_en.data(), this->nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_energy), this->nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_fluence), this->nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_mu), this->nkernels*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)(&d_mu_en), this->nkernels*sizeof(float)));
+
+    checkCudaErrors(cudaMemcpy(d_energy, this->energy.data(),
+        this->energy.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_fluence, this->fluence.data(),
+        this->nkernels*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_mu, this->mu.data(),
+        this->nkernels*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_mu_en, this->mu_en.data(),
+        this->nkernels*sizeof(float), cudaMemcpyHostToDevice));
     return 0;
 }
 
-__global__ void
-fd::d_test_spectrum(float* output, int width, int idx) {
-    int ii = threadIdx.x;
-    if (ii >= width)
-        return;
-    if (idx == 0) {
-        output[ii] = d_energy[ii];
-    } else if (idx == 1) {
-        output[ii] = d_fluence[ii];
-    } else if (idx == 2) {
-        output[ii] = d_mu[ii];
-    } else if (idx == 3) {
-        output[ii] = d_mu_en[ii];
+void fd::test_spectrum(const SPECTRUM_h& spectrum_h) {
+    int nkernels = spectrum_h.nkernels;
+
+    std::vector<float> energy_sample(nkernels);
+    std::vector<float> fluence_sample(nkernels);
+    std::vector<float> mu_sample(nkernels);
+    std::vector<float> mu_en_sample(nkernels);
+
+    checkCudaErrors(cudaMemcpy(energy_sample.data(), d_energy,
+        spectrum_h.nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(fluence_sample.data(), d_fluence,
+        spectrum_h.nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(mu_sample.data(), d_mu,
+        spectrum_h.nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(mu_en_sample.data(), d_mu_en,
+        spectrum_h.nkernels*sizeof(float), cudaMemcpyDeviceToHost));
+    
+    double absolute_diff = 0.;
+    for (int i=0; i<nkernels; i++) {
+        absolute_diff += abs(spectrum_h.energy[i] - energy_sample[i]);
+        absolute_diff += abs(spectrum_h.fluence[i] - fluence_sample[i]);
+        absolute_diff += abs(spectrum_h.mu[i] - mu_sample[i]);
+        absolute_diff += abs(spectrum_h.mu_en[i] - mu_en_sample[i]);
     }
+
+    std::cout << "Absolute difference: " << absolute_diff << std::endl << std::endl;
 }
 
 
@@ -170,7 +191,12 @@ bool fd::TermaComputeCollective(
         DensityBEV_array,
         density_d.densityTex,
         density_d.VoxelSize,
-        spectrum_h.nkernels
+        spectrum_h.nkernels,
+
+        // spectrum information
+        d_energy,
+        d_fluence,
+        d_mu
     );
     return 0;
 }
@@ -184,7 +210,12 @@ fd::d_TermaComputeCollective(
     float** DenseBEV_array,
     cudaTextureObject_t densityTex,
     float3 voxel_size,
-    int nkern
+    int nkern,
+
+    // spectrum information
+    float* d_energy_device,
+    float* d_fluence_device,
+    float* d_mu_device
 ) {
     int beam_idx = blockIdx.x;
     d_BEAM_d beam = beams[beam_idx];
@@ -234,9 +265,9 @@ fd::d_TermaComputeCollective(
 
             float terma_local = 0.f;
             for (int e=0; e<nkern; e++) {
-                float this_fluence = d_fluence[e] * fluence_value;
-                float this_energy = d_energy[e];
-                float this_mu = d_mu[e];
+                float this_fluence = d_fluence_device[e] * fluence_value;
+                float this_energy = d_energy_device[e];
+                float this_mu = d_mu_device[e];
                 terma_local += this_fluence * this_energy * this_mu *
                     __expf(- this_mu * radiological_path_length);
             }

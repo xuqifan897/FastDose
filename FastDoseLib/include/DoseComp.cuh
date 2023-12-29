@@ -25,7 +25,15 @@ namespace fastdose {
         float** DensityBEV_array,
         float** DoseBEV_array,
         int nTheta,
-        int nPhi
+        int nPhi,
+
+        // kernel information
+        float* d_paramA_device,
+        float* d_parama_device,
+        float* d_paramB_device,
+        float* d_paramb_device,
+        float* d_theta_device,
+        float* d_phi_device
     );
 
     bool test_DoseComputeCollective(

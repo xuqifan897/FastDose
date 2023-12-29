@@ -20,13 +20,11 @@ namespace fastdose{
         int nTheta;
         int nPhi;
 
-        bool read_kernel_file(const std::string& kernel_file, int nPhi, bool verbose=false);
+        bool read_kernel_file(const std::string& kernel_file, int nPhi, bool verbose=true);
         bool bind_kernel();
     };
 
     void test_kernel(const KERNEL_h& kernel_h);
-    __global__ void
-    d_test_kernel(float* output, int width, int idx);
 }
 
 #endif

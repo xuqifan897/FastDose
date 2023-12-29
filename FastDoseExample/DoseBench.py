@@ -45,6 +45,38 @@ def viewDosePVCS():
         figureFile = './figures/DosePVCSFmap{}.png'.format(FmapOn)
         plt.imsave(figureFile, DoseSlice)
 
+
+def reconfigureExamine():
+    """Here we changed the constant memory into a simple linear array"""
+    resultFolder = "/data/qifan/projects/EndtoEnd/results/CCCSslab"
+    TermaBEVFile = os.path.join(resultFolder, "TermaBEV.bin")
+    TermaPVCSFile = os.path.join(resultFolder, "TermaPVCS.bin")
+    DoseBEVFile = os.path.join(resultFolder, "DoseBEVFmap8.bin")
+    DosePVCSFile = os.path.join(resultFolder, "DosePVCSFmap8.bin")
+    fluenceShape = (16, 16)
+
+    TermaBEV = np.fromfile(TermaBEVFile, dtype=np.float32)
+    dimZ = TermaBEV.size / (fluenceShape[0] * fluenceShape[1])
+    BEVShape = (int(dimZ), fluenceShape[0], fluenceShape[1])
+    PVCSshape = (103, 103, 103)
+
+    TermaPVCS = np.fromfile(TermaPVCSFile, dtype=np.float32)
+    DoseBEV = np.fromfile(DoseBEVFile, dtype=np.float32)
+    DosePVCS = np.fromfile(DosePVCSFile, dtype=np.float32)
+
+    TermaBEV = np.reshape(TermaBEV, BEVShape)
+    TermaPVCS = np.reshape(TermaPVCS, PVCSshape)
+    DoseBEV = np.reshape(DoseBEV, BEVShape)
+    DosePVCS = np.reshape(DosePVCS, PVCSshape)
+
+    print(np.sum(TermaBEV))
+    print(np.sum(DoseBEV))
+    # TermaCenterline = TermaPVCS[51, :, :]
+    # TermaFile = './figures/'
+    # DoseCenterline = DosePVCS[51, :, :]
+
+
 if __name__ == '__main__':
-    viewDoseBEV()
-    viewDosePVCS()
+    # viewDoseBEV()
+    # viewDosePVCS()
+    reconfigureExamine()

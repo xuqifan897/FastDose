@@ -5,7 +5,36 @@
 namespace fd = fastdose;
 using namespace example;
 
+
+__global__ void d_testKernel(int* output, int size) {
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    if (idx >= size)
+        return;
+    output[idx] = idx;
+}
+
+
+void testKernel(){
+    int size = 1024;
+    int* output;
+    checkCudaErrors(cudaMalloc((void**)&output, size*sizeof(int)));
+    dim3 blockSize(64, 1, 1);
+    dim3 gridSize(16, 1, 1);
+    d_testKernel<<<gridSize, blockSize>>>(output, size);
+
+    cudaDeviceSynchronize();
+    std::vector<int> output_h(size);
+    checkCudaErrors(cudaMemcpy(output_h.data(), output, size*sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i=0; i<size; i++)
+        std::cout << output_h[i] << " ";
+    std::cout << std::endl;
+}
+
+
 int main(int argc, char** argv) {
+    testKernel();
+    return 0;
+
     if(argparse(argc, argv))
         return 0;
     

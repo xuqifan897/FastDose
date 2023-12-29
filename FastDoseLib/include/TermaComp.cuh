@@ -24,7 +24,12 @@ namespace fastdose {
         float** DenseBEV_array,
         cudaTextureObject_t densityTex,
         float3 voxel_size,
-        int nkern
+        int nkern,
+
+        // spectrum information
+        float* d_energy_device,
+        float* d_fluence_device,
+        float* d_mu_device
     );
 
     void BEV2PVCS(
