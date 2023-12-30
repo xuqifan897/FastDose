@@ -42,12 +42,22 @@ namespace fastdose {
         __inline__ __host__ BEAM_d(): fluence(nullptr), TermaBEV(nullptr), DensityBEV(nullptr) {}
 
         __inline__ __host__ ~BEAM_d() {
-            if (this->fluence != nullptr)
+            if (this->fluence != nullptr) {
                 checkCudaErrors(cudaFree(this->fluence));
-            if (this->TermaBEV != nullptr)
+                this->fluence = nullptr;
+            }
+            if (this->TermaBEV != nullptr) {
                 checkCudaErrors(cudaFree(this->TermaBEV));
-            if (this->DensityBEV != nullptr)
+                this->TermaBEV = nullptr;
+            }
+            if (this->DensityBEV != nullptr) {
                 checkCudaErrors(cudaFree(this->DensityBEV));
+                this->DensityBEV = nullptr;
+            }
+            if (this->DoseBEV != nullptr) {
+                checkCudaErrors(cudaFree(this->DoseBEV));
+                this->DoseBEV = nullptr;
+            }
         }
 
         float3 isocenter;

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 def viewDoseBEV():
-    dataFolder = "/data/qifan/projects/EndtoEnd/results/CCCSslab"
+    dataFolder = "/data/qifan/FastDoseWorkplace/CCCSslab"
     for FmapOn in [2, 4, 8, 16]:
         resZ = 0.08  # cm
         fluence_dim = (16, 16)
@@ -45,6 +45,43 @@ def viewDosePVCS():
         figureFile = './figures/DosePVCSFmap{}.png'.format(FmapOn)
         plt.imsave(figureFile, DoseSlice)
 
+
+def viewDoseOptm():
+    """
+    In the experiment, we set the fluence map size to be 0.5cm, 1cm, 2cm, and 4cm, respectively
+    """
+    resZ = 0.1  # cm
+    fluence_dim = (16, 16)
+    DosePVCSFile = "/data/qifan/FastDoseWorkplace/PhtmOptm/DosePVCS_0.4_1.6.bin"
+    PVCSShape = (103, 103, 103)
+    PVCSRes = 0.25
+    centerlineIdx = 51
+
+    DosePVCS = np.fromfile(DosePVCSFile, dtype=np.float32)
+    DosePVCS = np.reshape(DosePVCS, PVCSShape)
+    Centerline = DosePVCS[centerlineIdx, :, centerlineIdx]
+    depth = np.arange(PVCSShape[1]) * PVCSRes
+    plt.plot(depth, Centerline)
+    plt.xlabel('depth (cm)')
+    plt.ylabel('dose (a.u.)')
+    plt.title('Centerline dose\nBeamlet size: 0.4cm, extent: 1.6cm')
+    figureFile = './figures/DosePVCS_0.4_1.6.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
+    depthIdx = int(10.0 / PVCSRes)
+    lateralProfile = DosePVCS[centerlineIdx, depthIdx, :]
+    offAxis = (np.arange(PVCSShape[1]) - centerlineIdx) * PVCSRes
+    plt.plot(offAxis, lateralProfile)
+    plt.xlabel("Off axis distance (cm)")
+    plt.ylabel('dose (a.u.)')
+    plt.title("Lateral dose\nBeamlet size: 0.4cm, extent: 1.6cm")
+    figureFile = './figures/DoseLateral_0.4_1.6.png'
+    plt.savefig(figureFile)
+    plt.clf()
+
+
 if __name__ == '__main__':
-    viewDoseBEV()
-    viewDosePVCS()
+    # viewDoseBEV()
+    # viewDosePVCS()
+    viewDoseOptm()
