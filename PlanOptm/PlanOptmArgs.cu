@@ -53,7 +53,11 @@ bool PlanOptm::argparse(int argc, char** argv) {
 
     // io
     ("outputFolder", po::value<std::string>()->required(),
-        "Output folder");
+        "Output folder")
+    
+    // others
+    ("nBeamsReserve", po::value<int>()->default_value(1200),
+        "reserve space for beam allocation");
 
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);

@@ -219,3 +219,129 @@ bool PlanOptm::testCase(
 
     return 0;
 }
+
+
+bool PlanOptm::beamBundleTestCase(
+    std::vector<BeamBundle> beam_bundles,
+    fastdose::DENSITY_h& density_h,
+    fastdose::DENSITY_d& density_d,
+    fastdose::SPECTRUM_h& spectrum_h,
+    fastdose::KERNEL_h& kernel_h,
+    cudaStream_t stream
+) {
+    BeamBundle& first_beam_bundle = beam_bundles[0];
+    int nBeamlets = first_beam_bundle.fluenceDim.x * first_beam_bundle.fluenceDim.y;
+    first_beam_bundle.beams_d.resize(nBeamlets);
+    for (int i=0; i<nBeamlets; i++) {
+        fd::beam_h2d(first_beam_bundle.beams_h[i], first_beam_bundle.beams_d[i]);
+    }
+
+    // preparation
+    std::vector<fd::d_BEAM_d> h_beams;
+    h_beams.reserve(nBeamlets);
+    for (int i=0; i<nBeamlets; i++)
+        h_beams.push_back(fd::d_BEAM_d(first_beam_bundle.beams_d[i]));
+    fd::d_BEAM_d* d_beams = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_beams, nBeamlets*sizeof(fd::d_BEAM_d)));
+    checkCudaErrors(cudaMemcpy(d_beams, h_beams.data(),
+        nBeamlets*sizeof(fd::d_BEAM_d), cudaMemcpyHostToDevice));
+    
+    // allocate fluence array
+    std::vector<float*> h_fluence_array(nBeamlets, nullptr);
+    for (int i=0; i<nBeamlets; i++)
+        h_fluence_array[i] = first_beam_bundle.beams_d[i].fluence;
+    float** fluence_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)&fluence_array, nBeamlets*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(fluence_array, h_fluence_array.data(),
+        nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
+    
+    // allocate Terma_array
+    std::vector<float*> h_TermaBEV_array(nBeamlets, nullptr);
+    for (int i=0; i<nBeamlets; i++)
+        h_TermaBEV_array[i] = first_beam_bundle.beams_d[i].TermaBEV;
+    float** TermaBEV_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)&TermaBEV_array, nBeamlets*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(TermaBEV_array, h_TermaBEV_array.data(),
+        nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
+    
+    // allocate DenseBEV_array
+    std::vector<float*> h_DensityBEV_array(nBeamlets, nullptr);
+    for (int i=0; i<nBeamlets; i++)
+        h_DensityBEV_array[i] = first_beam_bundle.beams_d[i].DensityBEV;
+    float** DensityBEV_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)&DensityBEV_array, nBeamlets*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(DensityBEV_array, h_DensityBEV_array.data(),
+        nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
+
+    // allocate DoseBEV_array
+    std::vector<float*> h_DoseBEV_array(nBeamlets, nullptr);
+    for (int i=0; i<nBeamlets; i++)
+        h_DoseBEV_array[i] = first_beam_bundle.beams_d[i].DoseBEV;
+    float** DoseBEV_array = nullptr;
+    checkCudaErrors(cudaMalloc((void***)&DoseBEV_array, nBeamlets*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(DoseBEV_array, h_DoseBEV_array.data(),
+        nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
+    
+    size_t fmap_npixels = first_beam_bundle.subFluenceDim.x *
+        first_beam_bundle.subFluenceDim.y;
+
+    // for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
+    fd::TermaComputeCollective(
+        fmap_npixels,
+        nBeamlets,
+        d_beams,
+        fluence_array,
+        TermaBEV_array,
+        DensityBEV_array,
+        density_d,
+        spectrum_h,
+        stream
+    );
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0.0f;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "Terma time elapsed: " << milliseconds << " [ms]" << std::endl;
+
+
+    cudaEventRecord(start);
+
+    fd::DoseComputeCollective(
+        fmap_npixels,
+        nBeamlets,
+        d_beams,
+        TermaBEV_array,
+        DensityBEV_array,
+        DoseBEV_array,
+        kernel_h.nTheta,
+        kernel_h.nPhi,
+        stream
+    );
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "Dose time elapsed: " << milliseconds << " [ms]" << std::endl;
+
+
+    // retrieve result
+    std::string outputFolder = getarg<std::string>("outputFolder");
+    fs::path resultFolder = fs::path(outputFolder) / std::string("canonical");
+    if (! fs::exists(resultFolder))
+        fs::create_directories(resultFolder);
+
+    cudaArray* DoseBEV_Arr;
+    cudaTextureObject_t DoseBEV_Tex;
+    
+    for (int i=0; i<nBeamlets; i++) {
+
+    }
+
+    return 0;
+}

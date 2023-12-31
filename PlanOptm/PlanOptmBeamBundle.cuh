@@ -20,11 +20,13 @@ namespace PlanOptm {
         int2 subFluenceDim;
         int2 subFluenceOn;
 
-        bool beamletsInit();
-        bool beamletInit(fastdose::BEAM_h& beam_h, int idx_x, int idx_y);
+        bool beamletsInit(const fastdose::DENSITY_h& density_h);
+        bool beamletInit(fastdose::BEAM_h& beam_h, int idx_x,
+            int idx_y, const fastdose::DENSITY_h& density_h);
     };
 
-    bool BeamBundleInit(std::vector<BeamBundle>& beam_bundle);
+    bool BeamBundleInit(std::vector<BeamBundle>& beam_bundle,
+        const fastdose::DENSITY_h& density_h);
 }
 
 #endif
