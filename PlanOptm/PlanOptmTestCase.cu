@@ -336,12 +336,114 @@ bool PlanOptm::beamBundleTestCase(
     if (! fs::exists(resultFolder))
         fs::create_directories(resultFolder);
 
+
+    // destination array
+    cudaExtent DosePVCS_Arr_extent = make_cudaExtent(
+        density_d.VolumeDim.x * sizeof(float),
+        density_d.VolumeDim.y, density_d.VolumeDim.z);
+    cudaPitchedPtr DosePVCS_Arr;
+    checkCudaErrors(cudaMalloc3D(&DosePVCS_Arr, DosePVCS_Arr_extent));
+
     cudaArray* DoseBEV_Arr;
     cudaTextureObject_t DoseBEV_Tex;
     
     for (int i=0; i<nBeamlets; i++) {
+        fd::BEAM_d& current_beamlet = first_beam_bundle.beams_d[i];
 
+        // copy the Dose data to CPU
+        size_t nVoxels = current_beamlet.fmap_size.x *
+            current_beamlet.fmap_size.y * current_beamlet.long_dim;
+        size_t pitch_host = current_beamlet.fmap_size.x * 
+            current_beamlet.fmap_size.y;
+        std::vector<float> DoseBEV_cpu(nVoxels, 0.0f);
+        checkCudaErrors(cudaMemcpy2D(
+            DoseBEV_cpu.data(), pitch_host*sizeof(float),
+            current_beamlet.DoseBEV, current_beamlet.DoseBEV_pitch,
+            pitch_host*sizeof(float), current_beamlet.long_dim, cudaMemcpyDeviceToHost));
+        
+        #if false
+            // to ensure that the DoseBEV data has valid value
+            fs::path DoseBEVFile = resultFolder / (std::string("DoseBEV_beamlet")
+                + std::to_string(i+1) + std::string(".bin"));
+            std::ofstream f(DoseBEVFile.string());
+            if (! f.is_open()) {
+                std::cerr << "Cannot open file: " << DoseBEVFile.string() << std::endl;
+                return 1;
+            }
+            f.write((char*)DoseBEV_cpu.data(), nVoxels*sizeof(float));
+            f.close();
+            continue;
+        #endif
+
+        cudaExtent volumeSize = make_cudaExtent(current_beamlet.fmap_size.x,
+            current_beamlet.fmap_size.y, current_beamlet.long_dim);
+        cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+        checkCudaErrors(cudaMalloc3DArray(&DoseBEV_Arr, &channelDesc, volumeSize));
+
+        cudaMemcpy3DParms copyParams = {0};
+        copyParams.srcPtr =
+            make_cudaPitchedPtr(DoseBEV_cpu.data(),
+                current_beamlet.fmap_size.x * sizeof(float),
+                current_beamlet.fmap_size.x, current_beamlet.fmap_size.y);
+        copyParams.dstArray = DoseBEV_Arr;
+        copyParams.extent = volumeSize;
+        copyParams.kind = cudaMemcpyHostToDevice;
+        checkCudaErrors(cudaMemcpy3D(&copyParams));
+
+        cudaResourceDesc texRes;
+        memset(&texRes, 0, sizeof(cudaResourceDesc));
+        texRes.resType = cudaResourceTypeArray;
+        texRes.res.array.array = DoseBEV_Arr;
+
+        cudaTextureDesc texDescr;
+        memset(&texDescr, 0, sizeof(cudaTextureDesc));
+        texDescr.normalizedCoords = false;
+        texDescr.addressMode[0] = cudaAddressModeBorder;
+        texDescr.addressMode[1] = cudaAddressModeBorder;
+        texDescr.addressMode[2] = cudaAddressModeBorder;
+        checkCudaErrors(cudaCreateTextureObject(&DoseBEV_Tex, &texRes, &texDescr, NULL));
+
+        // clear destination array
+        checkCudaErrors(cudaMemset3D(DosePVCS_Arr, 0., DosePVCS_Arr_extent));
+        // calculate
+        // fd::BEV2PVCS(current_beamlet, density_d, DosePVCS_Arr, DoseBEV_Tex, stream);
+        fd::BEV2PVCS_SuperSampling(current_beamlet,
+            density_d, DosePVCS_Arr, DoseBEV_Tex, 5, stream);
+        // write result
+        size_t pitchedVolume = DosePVCS_Arr.pitch / sizeof(float) *
+            density_d.VolumeDim.y * density_d.VolumeDim.z;
+        size_t volume = density_d.VolumeDim.x * density_d.VolumeDim.y *
+            density_d.VolumeDim.z;
+        std::vector<float> DosePVCS_pitched(pitchedVolume);
+        std::vector<float> DosePVCS(volume);
+        checkCudaErrors(cudaMemcpy(DosePVCS_pitched.data(), DosePVCS_Arr.ptr,
+            pitchedVolume*sizeof(float), cudaMemcpyDeviceToHost));
+        fd::pitched2contiguous(DosePVCS, DosePVCS_pitched,
+            density_d.VolumeDim.x, density_d.VolumeDim.y, density_d.VolumeDim.z,
+            DosePVCS_Arr.pitch / sizeof(float));
+
+        fs::path DosePVCSFile = resultFolder / (std::string("DosePVCS_beamlet") 
+            + std::to_string(i+1) + std::string(".bin"));
+        std::ofstream f1(DosePVCSFile.string());
+        if (! f1.is_open()) {
+            std::cerr << "Cannot open file: " << DosePVCSFile << std::endl;
+            return 1;
+        }
+        f1.write((char*)DosePVCS.data(), volume*sizeof(float));
+        f1.close();
+
+        // clean up texture
+        checkCudaErrors(cudaDestroyTextureObject(DoseBEV_Tex));
+        checkCudaErrors(cudaFreeArray(DoseBEV_Arr));
     }
+
+    // further clean up
+    checkCudaErrors(cudaFree(DosePVCS_Arr.ptr));
+    checkCudaErrors(cudaFree(DoseBEV_array));
+    checkCudaErrors(cudaFree(DensityBEV_array));
+    checkCudaErrors(cudaFree(TermaBEV_array));
+    checkCudaErrors(cudaFree(fluence_array));
+    checkCudaErrors(cudaFree(d_beams));
 
     return 0;
 }

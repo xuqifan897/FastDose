@@ -34,4 +34,23 @@ namespace fastdose{
     int3 calcCoords(const float3& mid_point, const d_BEAM_d& beam);
 
     bool test_calcCoords(const std::vector<d_BEAM_d>& h_beams);
+
+    // BEV to PVCS interpolation, but with supersampling
+    void BEV2PVCS_SuperSampling(
+        BEAM_d& beam_d,
+        DENSITY_d& density_d,
+        cudaPitchedPtr& PitchedOutput,
+        cudaTextureObject_t BEVTex,
+        int ssfactor = 5,
+        cudaStream_t stream = 0
+    );
+
+    __global__ void
+    d_BEV2PVCS_SuperSampling(
+        d_BEAM_d beam_d,
+        cudaPitchedPtr PitchedArray,
+        cudaTextureObject_t BEVTex,
+        uint3 ArrayDim,
+        float3 voxel_size,
+        int ssfactor);
 }

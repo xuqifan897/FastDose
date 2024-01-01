@@ -46,7 +46,7 @@ bool PlanOptm::BeamBundleInit(
         last_beam_bundle.subFluenceDim = int2{subFluenceDim, subFluenceDim};
         last_beam_bundle.subFluenceOn = int2{subFluenceOn, subFluenceOn};
 
-        #if false
+        #if true
             if (count == 0) {
                 // modify the first beam into canonical form
                 last_beam_bundle.angles = make_float3(0.f, 0.f, 0.f);

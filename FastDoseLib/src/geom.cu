@@ -338,3 +338,121 @@ bool fd::test_calcCoords(const std::vector<d_BEAM_d>& h_beams) {
     std::cout << std::endl;
     return 0;
 }
+
+
+void fd::BEV2PVCS_SuperSampling(
+    BEAM_d& beam_d,
+    DENSITY_d& density_d,
+    cudaPitchedPtr& PitchedOutput,
+    cudaTextureObject_t BEVTex,
+    int ssfactor,
+    cudaStream_t stream
+) {
+    d_BEAM_d beam_input(beam_d);
+    uint width = density_d.VolumeDim.x;
+    uint height = density_d.VolumeDim.y;
+    uint depth = density_d.VolumeDim.z;
+    dim3 blockSize(16, 8, 4);
+    dim3 gridSize{
+        (width + blockSize.x - 1) / blockSize.x,
+        (height + blockSize.y - 1) / blockSize.y,
+        (depth + blockSize.z - 1) / blockSize.z
+    };
+
+    size_t sharedMemSize = blockSize.x * blockSize.y * blockSize.z * sizeof(float);
+    d_BEV2PVCS_SuperSampling<<<gridSize, blockSize, sharedMemSize, stream>>>(
+        beam_input,
+        PitchedOutput,
+        BEVTex,
+        density_d.VolumeDim,
+        density_d.VoxelSize,
+        ssfactor
+    );
+}
+
+
+static __device__ float3 d_rotateAroundAxisAtOriginRHS(
+    const float3& p, const float3& r, const float& t
+) {
+    /* derivation
+    here the rotation axis r is a unit vector.
+    So the vector to be rotate can be decomposed into 2 components.
+    1. the component along r: z = (p \cdot r) r, which is of module |p|\cos\theta
+    2. the component perpendicular to r: x = p - (p \cdot r) r, which is of module |p|\sin\theta
+    To rotate it, we introduce a third component, which is y = r \times p, which is of module |p|\sin\theta, the same as above.
+    So the result should be z + x\cos t + y \sin t, or
+        (1-\cos t)(p \cdot r)r  +  p\cos t  +  (r \times p)\sin t
+    */
+    float sptr, cptr;
+    fast_sincosf(t, &sptr, &cptr);
+    float one_minus_cost = 1 - cptr;
+    float p_dot_r = p.x * r.x + p.y * r.y + p.z * r.z;
+    float first_term_coeff = one_minus_cost * p_dot_r;
+    float3 result {
+        first_term_coeff * r.x  +  cptr * p.x  +  sptr * (r.y * p.z - r.z * p.y),
+        first_term_coeff * r.y  +  cptr * p.y  +  sptr * (r.z * p.x - r.x * p.z),
+        first_term_coeff * r.z  +  cptr * p.z  +  sptr * (r.x * p.y - r.y * p.x) 
+    };
+    return result;
+}
+
+static __device__ float3 d_rotateBeamAtOriginRHS(
+    const float3& vec, const float& theta, const float& phi, const float& coll
+) {
+    float sptr, cptr;
+    fast_sincosf(-phi, &sptr, &cptr);
+    float3 rotation_axis = make_float3(sptr, 0.0f, cptr);                          // couch rotation
+    float3 tmp = d_rotateAroundAxisAtOriginRHS(vec, rotation_axis, -theta);          // gantry rotation
+    return d_rotateAroundAxisAtOriginRHS(tmp, make_float3(0.f, 1.f, 0.f), phi+coll); // coll rotation + correction
+}
+
+
+__global__ void
+fd::d_BEV2PVCS_SuperSampling(
+    d_BEAM_d beam_d,
+    cudaPitchedPtr PitchedArray,
+    cudaTextureObject_t BEVTex,
+    uint3 ArrayDim,
+    float3 voxel_size,
+    int ssfactor
+) {
+    uint3 idx = threadIdx + blockDim * blockIdx;
+    if (idx.x >= ArrayDim.x || idx.y >= ArrayDim.y || idx.z >= ArrayDim.z)
+        return;
+
+    extern __shared__ float buffer[];
+    int bufferIdx = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * threadIdx.z);
+    float* local_value = buffer + bufferIdx;
+    *local_value = 0.0f;
+    size_t pitch = PitchedArray.pitch / sizeof(float);
+    float* ptr = (float*)PitchedArray.ptr;
+
+    float inverse_ssfactor = 1. / ssfactor;
+    for (int k=0; k<ssfactor; k++) {
+        float offset_k = (k + 0.5f) * inverse_ssfactor;
+        for (int j=0; j<ssfactor; j++) {
+            float offset_j = (j + 0.5f) * inverse_ssfactor;
+            for (int i=0; i<ssfactor; i++) {
+                float offset_i = (i + 0.5f) * inverse_ssfactor;
+
+                float3 coords{idx.x + offset_i, idx.y + offset_j, idx.z + offset_k};
+                coords *= voxel_size;
+                float3 coords_minus_source_PVCS = coords - beam_d.source;
+                float3 coords_minus_source_BEV = d_rotateBeamAtOriginRHS(
+                    coords_minus_source_PVCS, beam_d.angles.x, beam_d.angles.y, beam_d.angles.z);
+
+                float2 voxel_size_at_this_point = beam_d.beamlet_size * (coords_minus_source_BEV.y / beam_d.sad);
+                float3 coords_normalized {
+                    coords_minus_source_BEV.x / voxel_size_at_this_point.x + 0.5f * beam_d.fmap_size.x,
+                    (coords_minus_source_BEV.y - beam_d.lim_min) / beam_d.long_spacing,
+                    coords_minus_source_BEV.z / voxel_size_at_this_point.y + 0.5f * beam_d.fmap_size.y
+                };
+                *local_value += tex3D<float>(BEVTex,
+                    coords_normalized.x, coords_normalized.z, coords_normalized.y);
+            }
+        }
+    }
+
+    size_t global_coords = idx.x + pitch * (idx.y + ArrayDim.y * idx.z);
+    ptr[global_coords] = (*local_value) / (ssfactor * ssfactor);
+}

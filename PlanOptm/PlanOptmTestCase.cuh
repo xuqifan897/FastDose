@@ -23,6 +23,8 @@ namespace PlanOptm {
         fastdose::KERNEL_h& kernel_h,
         cudaStream_t stream=0
     );
+
+    bool textureMemTest();
 }
 
 #endif
