@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    #if true
+    #if false
         if (PlanOptm::beamBundleTestCase(
             beam_bundles,
             density_h,
@@ -56,6 +56,18 @@ int main(int argc, char** argv) {
             spectrum_h,
             kernel_h)) {
             std::cerr << "beam bundle test case problem." << std::endl;
+            return 1;
+        }
+    #endif
+
+    #if true
+        if (PlanOptm::beamBundleTestCaseSparse(
+            beam_bundles,
+            density_h,
+            density_d,
+            spectrum_h,
+            kernel_h)) {
+            std::cerr << "beam bundle test case sparse problem." << std::endl;
             return 1;
         }
     #endif

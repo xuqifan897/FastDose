@@ -217,6 +217,21 @@ def examine_individual_BEV():
             figureFile = os.path.join(figureFolder, 'beamlet{}.png'.format(i+1))
             plt.savefig(figureFile)
             plt.clf()
+    
+    if True:
+        figureFolder = './figures/canonical_BEV_slice'
+        if not os.path.isdir(figureFolder):
+            os.mkdir(figureFolder)
+        for i in range(nBeamlets):
+            file = os.path.join(dataFolder, 'DoseBEV_beamlet{}.bin'.format(i+1))
+            array = np.fromfile(file, dtype=np.float32)
+            dim_long = int (array.size / (fluenceShape[0] * fluenceShape[1]))
+            BEVshape = (dim_long, ) + fluenceShape
+            array = np.reshape(array, BEVshape)
+            slice = array[:, centerIdx, :]
+            figureFile = os.path.join(figureFolder, 'beamlet{}.png'.format(i+1))
+            plt.imsave(figureFile, slice)
+            plt.clf()
 
 
 def examine_projection():

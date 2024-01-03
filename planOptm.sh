@@ -9,7 +9,7 @@
     --boundingBoxStart 1 1 1 \
     --boundingBoxDimensions 100 100 100 \
     --beamlist "/data/qifan/FastDoseWorkplace/PhtmOptm/slabPhantom/beamlist_full.txt" \
-    --deviceIdx 3 \
+    --deviceIdx 1 \
     --spectrum "/data/qifan/FastDoseWorkplace/PhtmOptm/slabPhantom/spec_6mv.spec" \
     --kernel "/data/qifan/FastDoseWorkplace/PhtmOptm/slabPhantom/kernel_exp_6mv.txt" \
     --nPhi 8 \
