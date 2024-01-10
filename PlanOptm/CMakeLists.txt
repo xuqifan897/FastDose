@@ -14,7 +14,7 @@ set_target_properties(PlanOptm
 )
 
 set_property(TARGET PlanOptm
-    PROPERTY CUDA_ARCHITECTURES 89
+    PROPERTY CUDA_ARCHITECTURES ${CUDA_ARCH}
 )
 
 find_package(Boost REQUIRED COMPONENTS program_options filesystem)

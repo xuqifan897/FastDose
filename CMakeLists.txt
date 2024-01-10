@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.0)
-project(FastDose LANGUAGES CXX CUDA)
+project(FastDose LANGUAGES C CXX CUDA)
 
 set(CMAKE_BUILD_TYPE Release)
 
@@ -7,9 +7,12 @@ set(CMAKE_BUILD_TYPE Release)
 set(BINARY_DIR ${CMAKE_BINARY_DIR}/bin)
 file(MAKE_DIRECTORY ${BINARY_DIR})
 
+set(CUDA_ARCH 86)
+
 add_subdirectory(FastDoseLib)
 add_subdirectory(FastDoseExample)
 add_subdirectory(PlanOptm)
+add_subdirectory(IMRTOpt)
 
 # option(ENABLE_KERNELGEN "Include the subdirectory for kernel generation, based on Geant4" OFF)
 # if (ENABLE_KERNELGEN)

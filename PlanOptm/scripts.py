@@ -307,10 +307,27 @@ def examine_projection():
         plt.imsave(file, slice)
 
 
+def examine_PVCS_individual():
+    dataFolder = "/data/qifan/FastDoseWorkplace/PhtmOptm/canonical"
+    figureFolder = './figures/canonical_PVCS_individual'
+    if not os.path.isdir(figureFolder):
+        os.mkdir(figureFolder)
+    nBeamlets = 256
+    PVCSshape = (103, 103, 103)
+    for i in range(nBeamlets):
+        dataFile = os.path.join(dataFolder, 'DosePVCS_beamlet{}.bin'.format(i+1))
+        dataArray = np.fromfile(dataFile, dtype=np.float32)
+        dataArray = np.reshape(dataArray, PVCSshape)
+        dataProj = np.sum(dataArray, axis=0)
+        figureFile = os.path.join(figureFolder, 'beamlet{}.png'.format(i))
+        plt.imsave(figureFile, dataProj)
+
+
 if __name__ == '__main__':
     # showFPangles()
     # checkBeamletDose()
     # checkBeamletPVCS()
     # examine_individual_partial()
     # examine_individual_BEV()
-    examine_projection()
+    # examine_projection()
+    examine_PVCS_individual()

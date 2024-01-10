@@ -17,7 +17,7 @@ find_package(CUDA REQUIRED)
 target_include_directories(FastDose PRIVATE ${CUDA_INCLUDE_DIRS})
 target_link_libraries(FastDose PRIVATE)
 set_property(TARGET FastDose
-    PROPERTY CUDA_ARCHITECTURES 89)
+    PROPERTY CUDA_ARCHITECTURES ${CUDA_ARCH})
 
 # set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --generate-line-info -use_fast_math")
