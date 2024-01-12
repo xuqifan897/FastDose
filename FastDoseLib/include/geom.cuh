@@ -42,6 +42,7 @@ namespace fastdose{
         cudaPitchedPtr& PitchedOutput,
         cudaTextureObject_t BEVTex,
         int ssfactor = 5,
+        float extent = 2.0,  // to determine the range to interpolate dose
         cudaStream_t stream = 0
     );
 
@@ -52,5 +53,6 @@ namespace fastdose{
         cudaTextureObject_t BEVTex,
         uint3 ArrayDim,
         float3 voxel_size,
-        int ssfactor);
+        int ssfactor,
+        float extent);
 }

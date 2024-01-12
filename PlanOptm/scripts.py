@@ -242,8 +242,9 @@ def examine_projection():
     if not os.path.isdir(figureFolder):
         os.mkdir(figureFolder)
 
-    if False:
-        beamletIndices = [118, 119, 120]
+    if True:
+        # beamletIndices = [118, 119, 120]
+        beamletIndices = list(range(1, 257))
         projShape = (PVCSshape[1], PVCSshape[2])
         projSum = np.zeros(projShape, dtype=np.float32)
         for idx in beamletIndices:
@@ -253,9 +254,9 @@ def examine_projection():
             arrayProjection = np.sum(array, axis=0)
             projSum += arrayProjection
             figureFile = os.path.join(figureFolder, 'PVCSProj{}.png'.format(idx))
-            plt.imsave(figureFile, arrayProjection)
-        figureFile = os.path.join(figureFolder, 'projSum.png')
-        plt.imsave(figureFile, projSum)
+            plt.imsave(figureFile, projSum)
+        # figureFile = os.path.join(figureFolder, 'projSum.png')
+        # plt.imsave(figureFile, projSum)
 
     if False:
         doseTotal = np.zeros(PVCSshape, dtype=np.float32)
@@ -274,7 +275,7 @@ def examine_projection():
         sliceFile = os.path.join(figureFolder, 'totalDosePartial.png')
         plt.imsave(sliceFile, totalDoseProj)
     
-    if True:
+    if False:
         # to find out which beamlet has such a high profile
         doseTotal = np.zeros(PVCSshape, dtype=np.float32)
         idx_total = 0
@@ -329,5 +330,5 @@ if __name__ == '__main__':
     # checkBeamletPVCS()
     # examine_individual_partial()
     # examine_individual_BEV()
-    # examine_projection()
-    examine_PVCS_individual()
+    examine_projection()
+    # examine_PVCS_individsual()

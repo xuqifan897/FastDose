@@ -172,7 +172,7 @@ bool PlanOptm::beamBundleTestCaseSparse(
         DosePVCS_Arr.pitch = pitch_in_elements * sizeof(float);
 
         fd::BEV2PVCS_SuperSampling(current_beamlet,
-            density_d, DosePVCS_Arr, DoseBEV_Tex, 5, stream);
+            density_d, DosePVCS_Arr, DoseBEV_Tex, 5, 2.0f, stream);
 
         // clean up
         checkCudaErrors(cudaDestroyTextureObject(DoseBEV_Tex));

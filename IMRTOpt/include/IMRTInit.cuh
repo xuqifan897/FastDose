@@ -29,7 +29,14 @@ namespace IMRT {
     bool StructsInit(std::vector<StructInfo>& structs, bool verbose=true);
     bool readMaskFromHDF5(std::vector<StructInfo>& structs, const std::string& h5file);
 
-    bool densityInit(fastdose::DENSITY_h& density_h, fastdose::DENSITY_d& density_d);
+    bool densityInit(fastdose::DENSITY_h& density_h,
+        fastdose::DENSITY_d& density_d,
+        const std::vector<StructInfo>& structs);
+    bool getBBox(const std::vector<uint8_t>& bbox, const uint3 shape,
+        uint3& bbox_start, uint3& bbox_size);
+
+    bool specInit(fastdose::SPECTRUM_h& spectrum_h);
+    bool kernelInit(fastdose::KERNEL_h& kernel_h);
 }
 
 #endif

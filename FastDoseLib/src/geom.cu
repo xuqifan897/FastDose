@@ -346,13 +346,14 @@ void fd::BEV2PVCS_SuperSampling(
     cudaPitchedPtr& PitchedOutput,
     cudaTextureObject_t BEVTex,
     int ssfactor,
+    float extent,
     cudaStream_t stream
 ) {
     d_BEAM_d beam_input(beam_d);
     uint width = density_d.VolumeDim.x;
     uint height = density_d.VolumeDim.y;
     uint depth = density_d.VolumeDim.z;
-    dim3 blockSize(16, 8, 4);
+    dim3 blockSize(4, 4, 4);
     dim3 gridSize{
         (width + blockSize.x - 1) / blockSize.x,
         (height + blockSize.y - 1) / blockSize.y,
@@ -366,7 +367,8 @@ void fd::BEV2PVCS_SuperSampling(
         BEVTex,
         density_d.VolumeDim,
         density_d.VoxelSize,
-        ssfactor
+        ssfactor,
+        extent
     );
 }
 
@@ -414,10 +416,22 @@ fd::d_BEV2PVCS_SuperSampling(
     cudaTextureObject_t BEVTex,
     uint3 ArrayDim,
     float3 voxel_size,
-    int ssfactor
+    int ssfactor,
+    float extent
 ) {
     uint3 idx = threadIdx + blockDim * blockIdx;
     if (idx.x >= ArrayDim.x || idx.y >= ArrayDim.y || idx.z >= ArrayDim.z)
+        return;
+    
+    // to calculate its distance from the central axis. To exclude in advance
+    float3 voxel_coords{idx.x + 0.5f, idx.y + 0.5f, idx.z + 0.5f};
+    voxel_coords *= voxel_size;  // convert unitless coordinates to cm
+    float3 voxel_coords_minus_source_PVCS = voxel_coords - beam_d.source;
+    float3 voxel_coords_minus_source_BEV = d_rotateBeamAtOriginRHS(
+        voxel_coords_minus_source_PVCS, beam_d.angles.x, beam_d.angles.y, beam_d.angles.z);
+    float distance_square = voxel_coords_minus_source_BEV.x * voxel_coords_minus_source_BEV.x
+        + voxel_coords_minus_source_BEV.z * voxel_coords_minus_source_BEV.z;
+    if (distance_square > extent * extent)
         return;
 
     extern __shared__ float buffer[];
@@ -452,6 +466,8 @@ fd::d_BEV2PVCS_SuperSampling(
             }
         }
     }
+    if (*local_value < eps_fastdose)
+        return;
 
     size_t global_coords = idx.x + pitch * (idx.y + ArrayDim.y * idx.z);
     ptr[global_coords] = (*local_value) / (ssfactor * ssfactor);

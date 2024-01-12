@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    #if false
+    #if true
         if (PlanOptm::beamBundleTestCase(
             beam_bundles,
             density_h,
@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
         }
     #endif
 
-    #if true
+    #if false
         if (PlanOptm::beamBundleTestCaseSparse(
             beam_bundles,
             density_h,

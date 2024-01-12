@@ -5,6 +5,7 @@
 #include <H5Cpp.h>
 #include "IMRTInit.cuh"
 #include "IMRTArgs.h"
+#include "helper_math.cuh"
 
 namespace fd = fastdose;
 namespace fs = boost::filesystem;
@@ -101,7 +102,8 @@ bool IMRT::readMaskFromHDF5(std::vector<StructInfo>& structs, const std::string&
         }
         return 0;
     #endif
-    
+
+    const std::vector<int>& phantomDim = getarg<std::vector<int>>("phantomDim");
     for(int i=0; i<structs.size(); i++) {
         const std::string struct_name = structs[i].name;
         std::string key_name;
@@ -161,6 +163,14 @@ bool IMRT::readMaskFromHDF5(std::vector<StructInfo>& structs, const std::string&
             auto att = props_group.openAttribute("size");
             att.read(tuple3_native_t, temp);
             ARR3VECT(structs[i].size, temp);
+            if (structs[i].size.x != phantomDim[0] || 
+                structs[i].size.y != phantomDim[1] || 
+                structs[i].size.z != phantomDim[2]
+            ) {
+                std::cerr << "Phantom dimension and structure dimension doesn't match!" << std::endl;
+                std::cerr << structs[i].size << " != phantomDim" << std::endl;
+                return 1;
+            } 
 
             att = props_group.openAttribute("crop_size");
             att.read(tuple3_native_t, temp);
@@ -206,6 +216,7 @@ bool IMRT::readMaskFromHDF5(std::vector<StructInfo>& structs, const std::string&
             std::cout << structs[i] << std::endl << std::endl;
         }
     }
+    return 0;
 }
 
 
@@ -228,7 +239,95 @@ std::ostream& IMRT::operator<<(std::ostream& os, const StructInfo& obj) {
 }
 
 
-bool IMRT::densityInit(fd::DENSITY_h& density_h, fd::DENSITY_d& density_d) {
+bool IMRT::densityInit(fd::DENSITY_h& density_h, fd::DENSITY_d& density_d,
+    const std::vector<StructInfo>& structs
+) {
     const std::vector<float>& voxelSize = getarg<std::vector<float>>("voxelSize");
     const std::vector<int>& phantomDim = getarg<std::vector<int>>("phantomDim");
+
+    uint3 bbox_start, bbox_size;
+    const std::vector<uint8_t>& bbox = structs[1].mask;
+    const uint3& shape = structs[1].size;
+    getBBox(bbox, shape, bbox_start, bbox_size);
+    std::cout << "";
+    
+    density_h.VoxelSize = float3{voxelSize[0], voxelSize[1], voxelSize[2]};
+    density_h.VolumeDim = uint3{(uint)phantomDim[0], (uint)phantomDim[1], (uint)phantomDim[2]};
+    density_h.BBoxStart = bbox_start;
+    density_h.BBoxDim = bbox_size;
+    std::cout << "BBoxStart: " << bbox_start << ", BBoxDim: "
+        << bbox_size << std::endl << std::endl;
+
+    size_t volumeSize = phantomDim[0] * phantomDim[1] * phantomDim[2];
+    density_h.density.resize(volumeSize);
+
+    const std::string& densityFile = getarg<std::string>("density");
+    std::ifstream f(densityFile);
+    if (! f.is_open()) {
+        std::cerr << "Could not open file: " << densityFile << std::endl;
+        return 1;
+    }
+    f.read((char*)density_h.density.data(), volumeSize*sizeof(float));
+    f.close();
+
+    fd::density_h2d(density_h, density_d);
+    #if false
+        fd::test_density();
+    #endif
+    return 0;
+}
+
+
+bool IMRT::getBBox(const std::vector<uint8_t>& bbox, const uint3 shape,
+    uint3& bbox_start, uint3& bbox_size
+) {
+    // initialize
+    uint3 bbox_end{0, 0, 0};
+    bbox_start = shape - 1;
+    for (int i=0; i<shape.x; i++) {
+        for (int j=0; j<shape.y; j++) {
+            for (int k=0; k<shape.z; k++) {
+                size_t idx = i + shape.x * (j + shape.y * k);
+                if (bbox[idx] > 0) {
+                    bbox_start.x = min(bbox_start.x, i);
+                    bbox_start.y = min(bbox_start.y, j);
+                    bbox_start.z = min(bbox_start.z, k);
+
+                    bbox_end.x = max(bbox_end.x, i);
+                    bbox_end.y = max(bbox_end.y, j);
+                    bbox_end.z = max(bbox_end.z, k);
+                }
+            }
+        }
+    }
+    bbox_size = bbox_end + 1 - bbox_start;
+    return 0;
+}
+
+
+bool IMRT::specInit(fastdose::SPECTRUM_h& spectrum_h) {
+    const std::string& spectrum_file = getarg<std::string>("spectrum");
+    if (spectrum_h.read_spectrum_file(spectrum_file)) {
+        return 1;
+    }
+    if (spectrum_h.bind_spectrum())
+        return 1;
+    #if true
+        fd::test_spectrum(spectrum_h);
+    #endif
+    return 0;
+}
+
+
+bool IMRT::kernelInit(fastdose::KERNEL_h& kernel_h) {
+    const std::string kernel_file = getarg<std::string>("kernel");
+    int nPhi = getarg<int>("nPhi");
+    if (kernel_h.read_kernel_file(kernel_file, nPhi))
+        return 1;
+    if (kernel_h.bind_kernel())
+        return 1;
+    #if true
+        fd::test_kernel(kernel_h);
+    #endif
+    return 0;
 }

@@ -408,7 +408,7 @@ bool PlanOptm::beamBundleTestCase(
         // calculate
         // fd::BEV2PVCS(current_beamlet, density_d, DosePVCS_Arr, DoseBEV_Tex, stream);
         fd::BEV2PVCS_SuperSampling(current_beamlet,
-            density_d, DosePVCS_Arr, DoseBEV_Tex, 5, stream);
+            density_d, DosePVCS_Arr, DoseBEV_Tex, 5, 2.0f, stream);
         // write result
         size_t pitchedVolume = DosePVCS_Arr.pitch / sizeof(float) *
             density_d.VolumeDim.y * density_d.VolumeDim.z;

@@ -138,4 +138,12 @@ void fd::test_kernel(const KERNEL_h& kernel_h) {
     for (int i=0; i<kernel_h.nPhi; i++)
         std::cout << std::left << std::setw(width) << phi_sample[i];
     std::cout << std::endl;
+
+    // clean up
+    checkCudaErrors(cudaFree(paramA_sample_d));
+    checkCudaErrors(cudaFree(parama_sample_d));
+    checkCudaErrors(cudaFree(paramB_sample_d));
+    checkCudaErrors(cudaFree(paramb_sample_d));
+    checkCudaErrors(cudaFree(theta_sample_d));
+    checkCudaErrors(cudaFree(phi_sample_d));
 }

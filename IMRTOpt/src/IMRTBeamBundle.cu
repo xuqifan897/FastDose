@@ -1,18 +1,56 @@
-#include <string>
-#include <fstream>
-#include <algorithm>
-#include <math.h>
+#include <iomanip>
+
 #include "helper_math.cuh"
 #include "math_constants.h"
+#include "fastdose.cuh"
 
-#include "PlanOptmBeamBundle.cuh"
-#include "PlanOptmArgs.cuh"
+#include "IMRTBeamBundle.cuh"
+#include "IMRTArgs.h"
+#include "utils.cuh"
+#include "geomKernels.cuh"
+
 namespace fd = fastdose;
 
-bool PlanOptm::BeamBundleInit(
-    std::vector<BeamBundle>& beam_bundles, const fd::DENSITY_h& density_h
+bool IMRT::BeamBundleInit(std::vector<BeamBundle>& beam_bundles,
+    const fd::DENSITY_h& density_h,
+    const std::vector<StructInfo>& structs
 ) {
-    const std::vector<float>& isocenter = getarg<std::vector<float>>("isocenter");
+    // calculate the isocenter
+    const StructInfo& PTV_struct = structs[0];
+    const auto& PTV_mask = PTV_struct.mask;
+    const auto& PTV_size = PTV_struct.size;
+
+    double3 isocenter{0.0, 0.0, 0.0};
+    size_t PTV_nvoxels = 0;
+
+    for (int k=0; k<PTV_size.z; k++) {
+        for (int j=0; j<PTV_size.y; j++) {
+            for (int i=0; i<PTV_size.x; i++) {
+                size_t idx = i + PTV_size.x * (j + PTV_size.y * k);
+                if (PTV_mask[idx] > 0) {
+                    // for now, isocenter is unitless
+                    isocenter.x += i + 0.5;
+                    isocenter.y += j + 0.5;
+                    isocenter.z += k + 0.5;
+                    PTV_nvoxels += 1;
+                }
+            }
+        }
+    }
+    isocenter.x /= PTV_nvoxels;
+    isocenter.y /= PTV_nvoxels;
+    isocenter.z /= PTV_nvoxels;
+    
+    // convert unitless isocenter to that of cm
+    const std::vector<float>& voxelSize = getarg<std::vector<float>>("voxelSize");
+    isocenter.x *= voxelSize[0];
+    isocenter.y *= voxelSize[1];
+    isocenter.z *= voxelSize[2];
+    std::cout << "PTV structure name: " << PTV_struct.name << std::endl
+        << "Number of voxels: " << PTV_nvoxels << std::endl
+        << "Isocetner: (" << isocenter.x << ", " << isocenter.y 
+        << ", " << isocenter.z << ") [cm]" << std::endl << std::endl;;
+    
     const float SAD = getarg<float>("SAD");
     const int fluenceDim = getarg<int>("fluenceDim");
     const float beamletSize = getarg<float>("beamletSize");
@@ -30,85 +68,237 @@ bool PlanOptm::BeamBundleInit(
     int nBeamsReserve = getarg<int>("nBeamsReserve");
     beam_bundles.reserve(nBeamsReserve);
     std::string tableRow;
-
-    int count = 0;
+    float3 angles_degree;
     while (std::getline(f, tableRow)) {
         beam_bundles.emplace_back(BeamBundle());
         auto& last_beam_bundle = beam_bundles.back();
         std::istringstream iss(tableRow);
-        iss >> last_beam_bundle.angles.x >> last_beam_bundle.angles.y
-            >> last_beam_bundle.angles.z;
-        last_beam_bundle.isocenter = float3{isocenter[0], isocenter[1], isocenter[2]};
-        last_beam_bundle.beamletSize = float2{beamletSize, beamletSize};
-        last_beam_bundle.fluenceDim = int2{fluenceDim, fluenceDim};
+        iss >> angles_degree.x >> angles_degree.y >> angles_degree.z;
+        last_beam_bundle.angles = angles_degree * CUDART_PI_F / 180;
+        last_beam_bundle.isocenter = make_float3(
+            isocenter.x, isocenter.y, isocenter.z);
+        last_beam_bundle.beamletSize = make_float2(beamletSize, beamletSize);
+        last_beam_bundle.fluenceDim = make_int2(fluenceDim, fluenceDim);
         last_beam_bundle.SAD = SAD;
         last_beam_bundle.longSpacing = longSpacing;
-        last_beam_bundle.subFluenceDim = int2{subFluenceDim, subFluenceDim};
-        last_beam_bundle.subFluenceOn = int2{subFluenceOn, subFluenceOn};
-
-        #if true
-            if (count == 0) {
-                // modify the first beam into canonical form
-                last_beam_bundle.angles = make_float3(0.f, 0.f, 0.f);
-            }
-        #endif
-
-        // convert degree to radian
-        last_beam_bundle.angles *= CUDART_PI_F / 180.f;
-        if (last_beam_bundle.beamletsInit(density_h))
-            return 1;
-
-        #if false
-            // for debug purposes
-            if (count == 100) {
-                // for debug purposes
-                float3 minus_SAD_BEV{0.f, -last_beam_bundle.SAD, 0.f};
-                float3 beamBundleSource = last_beam_bundle.isocenter + 
-                    fd::inverseRotateBeamAtOriginRHS(minus_SAD_BEV,
-                        last_beam_bundle.angles.x, last_beam_bundle.angles.y,
-                        last_beam_bundle.angles.z);
-
-                float3 SAD_BEV_direction{0.f, 1.f, 0.f};
-                float3 SAD_PVCS_beambundle =
-                    fd::inverseRotateBeamAtOriginRHS(SAD_BEV_direction,
-                    last_beam_bundle.angles.x, last_beam_bundle.angles.y,
-                    last_beam_bundle.angles.z);
-
-                for (int i=0; i<last_beam_bundle.beams_h.size(); i++) {
-                    std::cout << last_beam_bundle.beams_h[i];
-                    std::cout << "Beam bundle isocenter: " << last_beam_bundle.isocenter << std::endl;
-                    std::cout << "Beam bundle angles: " << last_beam_bundle.angles << std::endl;
-                    std::cout << "Beam bundle source: " << beamBundleSource << std::endl;
-
-                    const float3& angles = last_beam_bundle.beams_h[i].angles;
-                    float3 SAD_PVCS_beam = fd::inverseRotateBeamAtOriginRHS(
-                        SAD_BEV_direction, angles.x, angles.y, angles.z);
-                    float ang_disp = dot(SAD_PVCS_beam, SAD_PVCS_beambundle);
-                    ang_disp = std::acos(ang_disp);
-                    std::cout << "Angle between beam bundle and beam: " <<
-                        ang_disp * 180 / CUDART_PI_F << " degree" << std::endl << std::endl;
-                }
-                break;
-            }
-        #endif
-
-        count ++;
+        last_beam_bundle.subFluenceDim = make_int2(subFluenceDim, subFluenceDim);
+        last_beam_bundle.subFluenceOn = make_int2(subFluenceOn, subFluenceOn);
     }
 
+    beamletFlagInit(beam_bundles, PTV_mask, density_h);
+
+    // initialize beam information
+    for (int i=0; i<beam_bundles.size(); i++) {
+        BeamBundle& current = beam_bundles[i];
+        current.beamletsInit(density_h);
+        std::cout << "Beam " << i+1 << ", number of active beamlets: "
+            << current.beams_h.size() << std::endl;
+    }
     return 0;
 }
 
 
-bool PlanOptm::BeamBundle::beamletsInit(const fd::DENSITY_h& density_h) {
-    int n_beamlets = this->fluenceDim.x * this->fluenceDim.x;
-    this->beams_h.reserve(n_beamlets);
+bool IMRT::beamletFlagInit(std::vector<BeamBundle>& beam_bundles,
+    const std::vector<uint8_t>& PTV_mask,
+    const fastdose::DENSITY_h& density_h,
+    cudaStream_t stream
+) {
+    // construct mask texture
+    fd::DENSITY_d PTV_density;
+    PTV_density.VoxelSize = density_h.VoxelSize;
+    PTV_density.VolumeDim = density_h.VolumeDim;
+    PTV_density.BBoxStart = density_h.BBoxStart;
+    PTV_density.BBoxDim = density_h.BBoxDim;
 
+    std::vector<float> PTV_mask_float(PTV_mask.size(), 0.0f);
+    for (int i=0; i<PTV_mask_float.size(); i++) {
+        PTV_mask_float[i] = PTV_mask[i];
+    }
+
+    cudaExtent volumeSize = make_cudaExtent(PTV_density.VolumeDim.x,
+        PTV_density.VolumeDim.y, PTV_density.VolumeDim.z);
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+    checkCudaErrors(cudaMalloc3DArray(&(PTV_density.densityArray), &channelDesc, volumeSize));
+
+    cudaMemcpy3DParms copyParams = {0};
+    copyParams.srcPtr = 
+        make_cudaPitchedPtr(PTV_mask_float.data(),
+            volumeSize.width * sizeof(float),
+            volumeSize.width, volumeSize.height);
+    copyParams.dstArray = PTV_density.densityArray;
+    copyParams.extent = volumeSize;
+    copyParams.kind = cudaMemcpyHostToDevice;
+    checkCudaErrors(cudaMemcpy3D(&copyParams));
+
+    cudaResourceDesc texRes;
+    memset(&texRes, 0, sizeof(cudaResourceDesc));
+    texRes.resType = cudaResourceTypeArray;
+    texRes.res.array.array = PTV_density.densityArray;
+
+    cudaTextureDesc texDescr;
+    memset(&texDescr, 0, sizeof(cudaTextureDesc));
+    texDescr.normalizedCoords = false;
+    texDescr.filterMode = cudaFilterModeLinear;
+    texDescr.addressMode[0] = cudaAddressModeBorder;
+    texDescr.addressMode[1] = cudaAddressModeBorder;
+    texDescr.addressMode[2] = cudaAddressModeBorder;
+    texDescr.readMode = cudaReadModeElementType;
+    checkCudaErrors(cudaCreateTextureObject(
+        &PTV_density.densityTex, &texRes, &texDescr, NULL));
+
+
+    // prepare beams
+    std::vector<fd::BEAM_h> beams_init;
+    beams_init.resize(beam_bundles.size());
+    for (int i=0; i<beam_bundles.size(); i++) {
+        fd::BEAM_h& current_beam = beams_init[i];
+        const BeamBundle& current_bundle = beam_bundles[i];
+
+        current_beam.isocenter = current_bundle.isocenter;
+        current_beam.beamlet_size = current_bundle.beamletSize;
+        current_beam.fmap_size = make_uint2(current_bundle.fluenceDim.x,
+            current_bundle.fluenceDim.y);
+        current_beam.sad = current_bundle.SAD;
+        current_beam.angles = current_bundle.angles;
+        current_beam.long_spacing = current_bundle.longSpacing;
+        current_beam.calc_range(density_h);
+        #if false
+            std::cout << "Beam bundle " << i+1 << ", long dim: "
+                << current_beam.long_dim << std::endl;
+        #endif
+    }
+    #if false
+        beams_init[0].fluence.resize(beams_init[0].fmap_size.x * beams_init[0].fmap_size.y);
+        std::cout << beams_init[0] << std::endl;
+        return 0;
+    #endif
+
+    std::vector<fd::d_BEAM_d> beams_h(beams_init.size());
+    for (int i=0; i<beams_init.size(); i++) {
+        fd::d_BEAM_d& current_dest = beams_h[i];
+        const fd::BEAM_h current_source = beams_init[i];
+        current_dest.isocenter = current_source.isocenter;
+        current_dest.beamlet_size = current_source.beamlet_size;
+        current_dest.fmap_size = current_source.fmap_size;
+        current_dest.sad = current_source.sad;
+        current_dest.angles = current_source.angles;
+        current_dest.long_spacing = current_source.long_spacing;
+        current_dest.lim_min = current_source.lim_min;
+        current_dest.lim_max = current_source.lim_max;
+        current_dest.long_dim = current_source.long_dim;
+        current_dest.source = current_source.source;
+    }
+
+    fd::d_BEAM_d* beams_d = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&beams_d, beams_h.size()*sizeof(fd::d_BEAM_d)));
+    checkCudaErrors(cudaMemcpy(beams_d, beams_h.data(),
+        beams_h.size()*sizeof(fd::d_BEAM_d), cudaMemcpyHostToDevice));
+
+    uint8_t* fmapOn = nullptr;
+    size_t nElements = beams_h.size() * beams_h[0].fmap_size.x 
+        * beams_h[0].fmap_size.y;
+    checkCudaErrors(cudaMalloc((void**)&fmapOn, nElements*sizeof(uint8_t)));
+    checkCudaErrors(cudaMemset(fmapOn, 0, nElements*sizeof(uint8_t)));
+
+    size_t fmap_npixels = beams_init[0].fmap_size.x * beams_init[0].fmap_size.y;
+    dim3 blockSize(((fmap_npixels + WARPSIZE - 1) / WARPSIZE) * WARPSIZE, 1, 1);
+    dim3 gridSize(beams_h.size(), 1, 1);
+    d_beamletFlagInit<<<gridSize, blockSize, 0, stream>>>(beams_d, fmapOn,
+        PTV_density.densityTex, PTV_density.VoxelSize, 3);
+
+    std::vector<uint8_t> fmapOn_h(nElements, 0);
+    checkCudaErrors(cudaMemcpy(fmapOn_h.data(), fmapOn, nElements*sizeof(uint8_t), cudaMemcpyDeviceToHost));
+    
+    # if false
+        // to take a view
+        std::cout << beams_h[0].fmap_size << std::endl;
+        for (int j=0; j<beams_h[0].fmap_size.y; j++) {
+            for (int i=0; i<beams_h[0].fmap_size.x; i++) {
+                std::cout << std::setw(6) << (int)fmapOn_h[i + j * beams_h[0].fmap_size.x];
+            }
+            std::cout << std::endl;
+        }
+    #endif
+
+    // copy the collective result to individual beam bundles
+    for (int i=0; i<beam_bundles.size(); i++) {
+        BeamBundle& current = beam_bundles[i];
+        current.beamletFlag.resize(fmap_npixels);
+        for (int j=0; j<fmap_npixels; j++) {
+            int jj = j + i * fmap_npixels;
+            current.beamletFlag[j] = fmapOn_h[jj];
+        }
+    }
+
+    checkCudaErrors(cudaFree(beams_d));
+    checkCudaErrors(cudaFree(fmapOn));
+    return 0;
+}
+
+
+__global__ void
+IMRT::d_beamletFlagInit(
+    fd::d_BEAM_d* beams_d, uint8_t* fmapOn,
+    cudaTextureObject_t PTVTex, float3 voxelSize,
+    int superSampling
+) {
+    int beam_idx = blockIdx.x;
+    fd::d_BEAM_d beam = beams_d[beam_idx];
+    int beamlet_x = threadIdx.x % beam.fmap_size.x;
+    int beamlet_y = threadIdx.x / beam.fmap_size.x;
+    if (threadIdx.y >= beam.fmap_size.y)
+        return;
+    
+    uint8_t* fmap_local = fmapOn + beam_idx * beam.fmap_size.x * beam.fmap_size.y;
+
+    uint8_t current_beamlet_on = 0;
+    for (int i=0; i<beam.long_dim; i++) {
+        float SXD = beam.lim_min + i * beam.long_spacing;
+        for (int j=0; j<superSampling; j++) {
+            for (int k=0; k<superSampling; k++) {
+                float3 BEV_displacement {
+                    (beamlet_x + (j + 0.5f) / superSampling -
+                        beam.fmap_size.x * 0.5f) * beam.beamlet_size.x,
+                    beam.sad,
+                    (beamlet_y + (k + 0.5f) / superSampling -
+                        beam.fmap_size.y * 0.5f) * beam.beamlet_size.y
+                };
+                float3 PVCS_displacement = d_inverseRotateBeamAtOriginRHS(
+                    BEV_displacement, beam.angles.x, beam.angles.y, beam.angles.z);
+                float3 PVCS_coords = beam.source + PVCS_displacement * SXD / beam.sad;
+                float3 PVCS_coords_unitless = PVCS_coords / voxelSize;
+                float value = tex3D<float>(PTVTex, PVCS_coords_unitless.x,
+                    PVCS_coords_unitless.y, PVCS_coords_unitless.z);
+                if (value > 0) {
+                    current_beamlet_on = true;
+                    break;
+                }
+            }
+            if (current_beamlet_on)
+                break;
+        }
+        if (current_beamlet_on)
+            break;
+    }
+    fmap_local[threadIdx.x] = current_beamlet_on;
+}
+
+
+bool IMRT::BeamBundle::beamletsInit(const fd::DENSITY_h& density_h) {
+    int n_active_beamlets = 0;
+    int fmap_npixels = this->fluenceDim.x * this->fluenceDim.y;
+    for (int i=0; i<fmap_npixels; i++) {
+        n_active_beamlets += (this->beamletFlag[i] > 0);
+    }
+    this->beams_h.resize(n_active_beamlets);
+    int count = 0;
     for (int j=0; j<this->fluenceDim.y; j++) {
         for (int i=0; i<this->fluenceDim.x; i++) {
-            this->beams_h.emplace_back(fd::BEAM_h());
-            auto& last_beam = this->beams_h.back();
-            if (this->beamletInit(last_beam, i, j, density_h)) {
-                return 1;
+            int idx = i + j * this->fluenceDim.x;
+            if (this->beamletFlag[idx]) {
+                fd::BEAM_h& localBeam = this->beams_h[count];
+                count ++;
+                this->beamletInit(localBeam, i, j, density_h);
             }
         }
     }
@@ -116,9 +306,8 @@ bool PlanOptm::BeamBundle::beamletsInit(const fd::DENSITY_h& density_h) {
 }
 
 
-bool PlanOptm::BeamBundle::beamletInit(
-    fd::BEAM_h& beam_h, int idx_x, int idx_y,
-    const fd::DENSITY_h& density_h
+bool IMRT::BeamBundle::beamletInit(fastdose::BEAM_h& beam_h, int idx_x,
+    int idx_y, const fastdose::DENSITY_h& density_h
 ) {
     // If we take out the beamlet, which can be abstracted as a 
     // quadrangular pyramid, whose vertices are the four
@@ -129,7 +318,7 @@ bool PlanOptm::BeamBundle::beamletInit(
     // are of the equal length, so that the beamlet is in the
     // canonical form, and can be characterized with SAD and
     // fluence map
-
+    
     float2 halfFluenceSize{this->fluenceDim.x * this->beamletSize.x * 0.5f,
         this->fluenceDim.y * this->beamletSize.y * 0.5f};
     float3 vertex0{idx_x * this->beamletSize.x - halfFluenceSize.x,

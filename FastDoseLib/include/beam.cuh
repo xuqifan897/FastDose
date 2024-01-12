@@ -84,6 +84,7 @@ namespace fastdose {
     class d_BEAM_d {
         // This variable is to avoid the copy of TermaBEVPitch and fluence. Otherwise the same as above
         public:
+        d_BEAM_d() = default;
         d_BEAM_d(const BEAM_d& old):
             isocenter(old.isocenter),
             beamlet_size(old.beamlet_size),

@@ -13,6 +13,9 @@ bool IMRT::argparse(int argc, char** argv) {
         "The phantom dimension")
     ("voxelSize", po::value<std::vector<float>>()->multitoken()->required(),
         "The isotropic resolution [cm]")
+    ("SAD", po::value<float>()->required(),
+        "Source-to-axis distance [cm]. The isocenter by default "
+        "is the center of mass of the PTV volume")
     ("density", po::value<std::string>()->required(),
         "The path to the density raw file")
     ("masks", po::value<std::string>()->required(),
@@ -39,14 +42,20 @@ bool IMRT::argparse(int argc, char** argv) {
         "The number of phi angles in convolution")
     ("fluenceDim", po::value<int>()->default_value(20),
         "Fluence map dimension")
-    ("beamletSize", po::value<int>()->default_value(0.5))
-    ("subFluenceDim", po::value<int>()->default_value(20),
+    ("beamletSize", po::value<float>()->default_value(0.5),
+        "Beamlet size in cm")
+    ("subFluenceDim", po::value<int>()->default_value(16),
         "The dimension of subdivided fluence for dose calculation accuracy")
     ("subFluenceOn", po::value<int>()->default_value(4),
         "The number of fluence pixels that are on in the subdivided fluence map, "
         "which corresponds to the beamlet size")
     ("longSpacing", po::value<float>()->default_value(0.25),
         "Longitudinal voxel size in the dose calculation")
+    ("concurrency", po::value<int>()->default_value(8),
+        "How many beams whose beamlet dose matrices are computed concurrently")
+    ("extent", po::value<float>()->default_value(2.0f),
+        "Used in dose interpolation, i.e., the dose from BEV to PVCS. For voxels "
+        "farther than the distance, the dose is 0 [cm]")
         
     // io
     ("outputFolder", po::value<std::string>()->required(),

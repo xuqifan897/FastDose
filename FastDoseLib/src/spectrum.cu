@@ -102,4 +102,10 @@ void fd::test_spectrum(const SPECTRUM_h& spectrum_h) {
     }
 
     std::cout << "Absolute difference: " << absolute_diff << std::endl;
+
+    // clean up
+    checkCudaErrors(cudaFree(energy_sample_d));
+    checkCudaErrors(cudaFree(fluence_sample_d));
+    checkCudaErrors(cudaFree(mu_sample_d));
+    checkCudaErrors(cudaFree(mu_en_sample_d));
 }
