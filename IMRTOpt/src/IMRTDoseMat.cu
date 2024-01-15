@@ -1,5 +1,6 @@
 #include "IMRTDoseMat.cuh"
 #include "IMRTArgs.h"
+#include "IMRTgeom.cuh"
 
 namespace fd = fastdose;
 
@@ -198,6 +199,15 @@ bool IMRT::DoseMatConstruction(
         checkCudaErrors(cudaFree(d_DensityBEV_array));
         checkCudaErrors(cudaFree(d_TermaBEV_array));
         checkCudaErrors(cudaFree(d_fluence_array));
+        
+        float* d_dense_dose;
+        size_t denseDoseSize = density_d.VolumeDim.x
+            * density_d.VolumeDim.y * density_d.VolumeDim.z
+            * beamlets.size();
+        checkCudaErrors(cudaMalloc((void**)&d_dense_dose, denseDoseSize*sizeof(float)));
+        checkCudaErrors(cudaMemset(d_dense_dose, 0, denseDoseSize*sizeof(float)));
+        BEV2PVCSInterp(&d_dense_dose, beamlets, d_beams, density_d, 5, extent, stream);
+
         checkCudaErrors(cudaFree(d_beams));
 
         #if false
@@ -207,81 +217,7 @@ bool IMRT::DoseMatConstruction(
                 "Total memory: " << (float)totalBytes / (1<<30) << "GB." << std::endl;
         #endif
 
-
-        #if false
-            #if TIMING
-                cudaEventRecord(start);
-            #endif
-            // convert BEV dose to PVCS dose
-            float* DosePVCSCollective = nullptr;
-            size_t singleMatrixSize = density_d.VolumeDim.x *
-                density_d.VolumeDim.y * density_d.VolumeDim.z;
-            size_t totalMatrixSize = singleMatrixSize * nBeamlets;
-            size_t totalMemorySize = totalMatrixSize * sizeof(float);
-            std::cout << "Total matrix size: " << (float)totalMemorySize / (1<<30) << "GB" << std::endl;
-            checkCudaErrors(cudaMalloc((void**)&DosePVCSCollective, totalMatrixSize*sizeof(float)));
-            checkCudaErrors(cudaMemset(DosePVCSCollective, 0, totalMatrixSize*sizeof(float)));
-            for (int j=0; j<nBeamlets; j++) {
-                fd::BEAM_d& current_beamlet = beamlets[j];
-                
-                if (current_beamlet.fmap_size.x * current_beamlet.fmap_size.y != 
-                    current_beamlet.DoseBEV_pitch / sizeof(float)
-                ) {
-                    std::cout << "The fluence map size " << current_beamlet.fmap_size 
-                        << " does not match the pitch size: " << current_beamlet.DoseBEV_pitch / sizeof(float)
-                        << " Please adjust the fluence map dimension" << std::endl;
-                    return 1;
-                }
-                cudaArray* DoseBEV_Arr;
-                cudaTextureObject_t DoseBEV_Tex;
-                cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
-                cudaExtent volumeSize = make_cudaExtent(current_beamlet.fmap_size.x,
-                    current_beamlet.fmap_size.y, current_beamlet.long_dim);
-                cudaMalloc3DArray(&DoseBEV_Arr, &channelDesc, volumeSize);
-                // copy to cudaArray
-                cudaMemcpy3DParms copyParams = {0};
-                copyParams.srcPtr = make_cudaPitchedPtr(
-                    (void*)(current_beamlet.DoseBEV),
-                    volumeSize.width*sizeof(float),
-                    volumeSize.width,
-                    volumeSize.height);
-                copyParams.dstArray = DoseBEV_Arr;
-                copyParams.extent = volumeSize;
-                copyParams.kind = cudaMemcpyDeviceToDevice;
-                checkCudaErrors(cudaMemcpy3D(&copyParams));
-
-                cudaResourceDesc texRes;
-                memset(&texRes, 0, sizeof(cudaResourceDesc));
-                texRes.resType = cudaResourceTypeArray;
-                texRes.res.array.array = DoseBEV_Arr;
-
-                cudaTextureDesc texDescr;
-                memset(&texDescr, 0, sizeof(texDescr));
-                texDescr.normalizedCoords = false;
-                texDescr.addressMode[0] = cudaAddressModeBorder;
-                texDescr.addressMode[1] = cudaAddressModeBorder;
-                texDescr.addressMode[2] = cudaAddressModeBorder;
-                checkCudaErrors(cudaCreateTextureObject(&DoseBEV_Tex, &texRes, &texDescr, nullptr));
-
-                // prepare DosePVCS_Arr
-                cudaPitchedPtr DosePVCS_Arr;
-                DosePVCS_Arr.ptr = DosePVCSCollective + i * singleMatrixSize;
-                DosePVCS_Arr.pitch = density_d.VolumeDim.x * sizeof(float);
-
-                fd::BEV2PVCS_SuperSampling(current_beamlet,
-                    density_d, DosePVCS_Arr, DoseBEV_Tex, 5, extent);
-                
-                // clean up
-                checkCudaErrors(cudaDestroyTextureObject(DoseBEV_Tex));
-                checkCudaErrors(cudaFreeArray(DoseBEV_Arr));
-            }
-            #if TIMING
-                cudaEventRecord(stop);
-                cudaEventSynchronize(stop);
-                cudaEventElapsedTime(&milliseconds, start, stop);
-                std::cout << "Interpolation time elapsed: " << milliseconds << " [ms]" << std::endl;
-            #endif
-        #endif
+        #include "IMRTDirectInterp.cpp.in"
 
         // for debug purposes
         break;

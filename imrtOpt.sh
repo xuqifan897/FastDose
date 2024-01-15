@@ -1,4 +1,8 @@
 #!/bin/bash
+outputFolder="/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize"
+if [ ! -d ${outputFolder} ]; then
+    mkdir ${outputFolder}
+fi;
 
 if false; then
     ./build/bin/IMRT \
@@ -17,7 +21,7 @@ if false; then
         --kernel "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
         --subFluenceDim 16 \
         --concurrency 4 \
-        --outputFolder "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize" \
+        --outputFolder ${outputFolder} \
         --nBeamsReserve 452
 fi
 

@@ -411,6 +411,29 @@ def writeRingStruct():
     maskArray.tofile(destfile)
 
 
+def viewPreSampling():
+    folder = '/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize'
+    file = os.path.join(folder, 'preSamplingView.bin')
+    nBeamlets = 895
+    preSamplingBeamlet = (19, 28, 28)
+
+    globalShape = (nBeamlets, ) + preSamplingBeamlet
+    array = np.fromfile(file, dtype=np.uint8)
+    array = np.reshape(array, globalShape)
+    
+    figuresFolder = os.path.join(folder, 'preSamplingProj')
+    if (not os.path.isdir(figuresFolder)):
+        os.mkdir(figuresFolder)
+
+    if False:
+        for i in range(nBeamlets):
+            local_array = array[i, :, :, :]
+            proj = np.sum(local_array, axis=0)
+            file = os.path.join(figuresFolder, 'beamlet{:03d}.png'.format(i))
+            plt.imsave(file, proj)
+            print(file)
+
+
 if __name__ == '__main__':
     # examineMasks()
     # readMasks()
@@ -418,6 +441,7 @@ if __name__ == '__main__':
     # examineDcm()
     # maskAlign()
     # MasksH5Gen()
-    examineMaskGen()
+    # examineMaskGen()
     # MaskH5Copy()
     # writeRingStruct()
+    viewPreSampling()

@@ -106,6 +106,9 @@ bool fd::showDeviceProperties(int deviceIdx) {
         deviceProp.warpSize << std::endl;
     std::cout << "    Number of SMs in total: " << 
         deviceProp.multiProcessorCount << std::endl;
+    int* maxTexture3D = deviceProp.maxTexture3D;
+    std::cout << "    Maximum 3D texture dimensions: (" << maxTexture3D[0] << ", " 
+        << maxTexture3D[1] << ", " << maxTexture3D[2] << ")" << std::endl;
     std::cout << std::endl;
     return 0;
 }

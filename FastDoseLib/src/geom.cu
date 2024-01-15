@@ -470,5 +470,5 @@ fd::d_BEV2PVCS_SuperSampling(
         return;
 
     size_t global_coords = idx.x + pitch * (idx.y + ArrayDim.y * idx.z);
-    ptr[global_coords] = (*local_value) / (ssfactor * ssfactor);
+    ptr[global_coords] = (*local_value) / (ssfactor * ssfactor * ssfactor);
 }
