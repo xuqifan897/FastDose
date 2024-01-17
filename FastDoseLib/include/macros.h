@@ -24,6 +24,7 @@
 #endif
 
 #define eps_fastdose 1e-4f
+#define larger_eps_fastdose 1e-3f
 #define WARPSIZE 32
 
 #endif

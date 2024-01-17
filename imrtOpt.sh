@@ -4,7 +4,7 @@ if [ ! -d ${outputFolder} ]; then
     mkdir ${outputFolder}
 fi;
 
-if false; then
+if true; then
     ./build/bin/IMRT \
         --phantomDim 220 220 149 \
         --voxelSize 0.25 0.25 0.25 \
@@ -16,17 +16,19 @@ if false; then
         --structureInfo "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
         --params "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
         --beamlist "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
-        --deviceIdx 2 \
+        --deviceIdx 3 \
         --spectrum "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
         --kernel "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
         --subFluenceDim 16 \
-        --concurrency 4 \
+        --concurrency 1 \
         --outputFolder ${outputFolder} \
         --nBeamsReserve 452
 fi
 
+# break /data/qifan/FastDose/IMRTOpt/src/IMRTDebug.cu:162
 
-if true; then
+
+if false; then
     resultFolder="/data/qifan/FastDoseWorkplace/BOOval/LUNG/experiment"
     if [ ! -d ${resultFolder} ]; then
         mkdir ${resultFolder}

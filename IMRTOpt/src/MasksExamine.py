@@ -434,6 +434,106 @@ def viewPreSampling():
             print(file)
 
 
+def viewPVCSDose():
+    folder = '/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize'
+    file = os.path.join(folder, 'DoseInterp.bin')
+    denseVolume = (149, 220, 220)
+    nElementsPerVolume = denseVolume[0] * denseVolume[1] * denseVolume[2]
+
+    if False:
+        totalArray = np.fromfile(file, dtype=np.float32)
+        nBeamlets = int(totalArray.size / nElementsPerVolume)
+        print("Number of beamlets: {}".format(nBeamlets))
+        totalShape = (nBeamlets,) + denseVolume
+        totalArray = np.reshape(totalArray, totalShape)
+        ProjArray = np.sum(totalArray, axis=1)
+
+        figuresFolder = os.path.join(folder, 'samplingProj')
+        if not os.path.isdir(figuresFolder):
+            os.mkdir(figuresFolder)
+        for i in range(nBeamlets):
+            filename = os.path.join(figuresFolder, '{:03d}.png'.format(i))
+            plt.imsave(filename, ProjArray[i, :, :])
+            print(filename)
+        
+    if True:
+        densityFile = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw"
+        density = np.fromfile(densityFile, dtype=np.float32)
+        density = np.reshape(density, denseVolume)
+
+        nBeamlets = 225
+        to_load = nElementsPerVolume * nBeamlets
+        totalArray = np.fromfile(file, dtype=np.float32, count=to_load)
+        totalShape = (nBeamlets, ) + denseVolume
+        totalArray = np.reshape(totalArray, totalShape)
+        # sum across all beamlets within the first beam
+        totalArray = np.sum(totalArray, axis=0)
+
+        figureFolder = './figures'
+
+        densitySlice = density[:, 110, :]
+        cross_section = totalArray[:, 110, :]
+        plt.imshow(densitySlice, cmap='gray')
+        plt.imshow(cross_section, alpha=0.5)
+        image = os.path.join(figureFolder, 'beamOneCrossSection1.png')
+        plt.savefig(image)
+        plt.clf()
+
+        densitySlice = density[90, :, :]
+        cross_section = totalArray[90, :, :]
+        plt.imshow(densitySlice, cmap='gray')
+        plt.imshow(cross_section, alpha=0.5)
+        image = os.path.join(figureFolder, 'beamOneCrossSection2.png')
+        plt.savefig(image)
+        plt.clf()
+
+        densitySlice = density[:, :, 70]
+        cross_section = totalArray[:, :, 70]
+        plt.imshow(densitySlice, cmap='gray')
+        plt.imshow(cross_section, alpha=0.5)
+        image = os.path.join(figureFolder, 'beamOneCrossSection3.png')
+        plt.savefig(image)
+        plt.clf()
+
+
+def viewBEVDose():
+    rootFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize"
+    dataFolder = os.path.join(rootFolder, 'doseCompDebug')
+    fmapDim = (16, 16)
+    nBeamlets = 202
+
+    imageFolder = os.path.join(rootFolder, 'doseCompDebugView')
+    if not os.path.isdir(imageFolder):
+        os.mkdir(imageFolder)
+
+    for i in range(nBeamlets):
+        file = os.path.join(dataFolder, 'BEVDensity{}.bin'.format(i))
+        array = np.fromfile(file, dtype=np.float32)
+
+        dimLong = int(array.size / (fmapDim[0] * fmapDim[1]))
+        shape = (dimLong, ) + fmapDim
+        array = np.reshape(array, shape)
+        proj = array[:, :, 8]
+        imageFile = os.path.join(imageFolder, 'BEVDensity{}.png'.format(i))
+        plt.imsave(imageFile, proj)
+
+        file = os.path.join(dataFolder, 'BEVDose{}.bin'.format(i))
+        array = np.fromfile(file, dtype=np.float32)
+        array = np.reshape(array, shape)
+        proj = array[:, :, 8]
+        imageFile = os.path.join(imageFolder, 'BEVDose{}.png'.format(i))
+        plt.imsave(imageFile, proj)
+
+        file = os.path.join(dataFolder, 'BEVTerma{}.bin'.format(i))
+        array = np.fromfile(file, dtype=np.float32)
+        array = np.reshape(array, shape)
+        proj = array[:, :, 8]
+        imageFile = os.path.join(imageFolder, 'BEVTerma{}.png'.format(i))
+        plt.imsave(imageFile, proj)
+        
+        print("Beamlet {}".format(i))
+
+
 if __name__ == '__main__':
     # examineMasks()
     # readMasks()
@@ -444,4 +544,6 @@ if __name__ == '__main__':
     # examineMaskGen()
     # MaskH5Copy()
     # writeRingStruct()
-    viewPreSampling()
+    # viewPreSampling()
+    # viewPVCSDose()
+    viewBEVDose()

@@ -81,26 +81,33 @@ namespace fastdose {
         float3 stepSize;
 
         if (direction.x > 0) {
-            stepSize.x = (ceilf(currentLocation.x + eps_fastdose) - currentLocation.x) / direction.x;
+            stepSize.x = (ceilf(currentLocation.x + larger_eps_fastdose) - currentLocation.x) / direction.x;
         } else {
-            stepSize.x = (floorf(currentLocation.x - eps_fastdose) - currentLocation.x) / direction.x;
+            stepSize.x = (floorf(currentLocation.x - larger_eps_fastdose) - currentLocation.x) / direction.x;
         }
 
         if (direction.y > 0) {
-            stepSize.y = (ceilf(currentLocation.y + eps_fastdose) - currentLocation.y) / direction.y;
+            stepSize.y = (ceilf(currentLocation.y + larger_eps_fastdose) - currentLocation.y) / direction.y;
         } else {
-            stepSize.y = (floorf(currentLocation.y - eps_fastdose) - currentLocation.y) / direction.y;
+            stepSize.y = (floorf(currentLocation.y - larger_eps_fastdose) - currentLocation.y) / direction.y;
         }
 
         if (direction.z > 0) {
-            stepSize.z = (ceilf(currentLocation.z + eps_fastdose) - currentLocation.z) / direction.z;
+            stepSize.z = (ceilf(currentLocation.z + larger_eps_fastdose) - currentLocation.z) / direction.z;
         } else {
-            stepSize.z = (floorf(currentLocation.z - eps_fastdose) - currentLocation.z) / direction.z;
+            stepSize.z = (floorf(currentLocation.z - larger_eps_fastdose) - currentLocation.z) / direction.z;
         }
 
         float stepTake = fmin(fmin(stepSize.x, stepSize.y), stepSize.z);
-        *flag = abs(stepTake - stepSize.z) < eps_fastdose;
-        return currentLocation + stepTake * direction;
+        float3 result = currentLocation + stepTake * direction;
+        *flag = abs(result.z - roundf(result.z)) < eps_fastdose;
+
+        if (*flag) {
+            stepTake = stepSize.z;
+            result = currentLocation + stepTake * direction;
+            result.z = roundf(result.z);
+        }
+        return result;
     }
 
 

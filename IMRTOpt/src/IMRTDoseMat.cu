@@ -1,3 +1,8 @@
+#include <fstream>
+#include <iomanip>
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+
 #include "IMRTDoseMat.cuh"
 #include "IMRTArgs.h"
 #include "IMRTgeom.cuh"
@@ -5,7 +10,7 @@
 namespace fd = fastdose;
 
 bool IMRT::MatCSR::dense2sparse(
-    float* d_dense, int num_rows, int num_cols, int ld
+    float* d_dense, size_t num_rows, size_t num_cols, size_t ld
 ) {
     checkCudaErrors(cudaMalloc((void**)(&this->d_csr_offsets),
         (num_rows + 1) * sizeof(int)));
@@ -34,7 +39,7 @@ bool IMRT::MatCSR::dense2sparse(
         &bufferSize))
     checkCudaErrors(cudaMalloc((void**) &dBufferConstruct, bufferSize));
     
-    // execute Sparse to Dense conversion
+    // execute Dense to Sparse conversion
     checkCusparse(cusparseDenseToSparse_analysis(
         handle, matDense, this->matA,
         CUSPARSE_DENSETOSPARSE_ALG_DEFAULT, dBufferConstruct))
@@ -51,7 +56,7 @@ bool IMRT::MatCSR::dense2sparse(
     checkCusparse(cusparseCsrSetPointers(this->matA,
         this->d_csr_offsets, this->d_csr_columns, this->d_csr_values))
     
-    // execute Sparse to Dense conversion
+    // execute Dense to Sparse conversion
     checkCusparse(cusparseDenseToSparse_convert(handle, matDense, this->matA,
         CUSPARSE_DENSETOSPARSE_ALG_DEFAULT, dBufferConstruct))
     
@@ -71,11 +76,23 @@ bool IMRT::DoseMatConstruction(
     // prepare the sparse dose matrices
     std::vector<MatCSR> SparseMatArray;
 
+    cudaEvent_t start, stop, globalStart, globalStop;
+    checkCudaErrors(cudaEventCreate(&start));
+    checkCudaErrors(cudaEventCreate(&stop));
+    checkCudaErrors(cudaEventCreate(&globalStart));
+    checkCudaErrors(cudaEventCreate(&globalStop));
+    float milliseconds;
+
     // firstly, calculate Terma and Dose
     int concurrency = getarg<int>("concurrency");
     float extent = getarg<float>("extent");
     int iterations = (beam_bundles.size() + concurrency - 1) / concurrency;
+    SparseMatArray.resize(iterations);
+
+    cudaEventRecord(globalStart);
     for (int i=0; i<iterations; i++) {
+        cudaEventRecord(start);
+
         std::vector<fd::BEAM_d> beamlets;
         int beam_bundle_idx_begin = i * concurrency;
         int beam_bundle_idx_end = (i + 1) * concurrency;
@@ -144,13 +161,6 @@ bool IMRT::DoseMatConstruction(
 
         size_t fmap_npixels = beamlets[0].fmap_size.x * beamlets[0].fmap_size.y;
 
-        #if TIMING
-            cudaEvent_t start, stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
-            cudaEventRecord(start);
-        #endif
-
         fd::TermaComputeCollective(
             fmap_npixels,
             nBeamlets,
@@ -163,18 +173,6 @@ bool IMRT::DoseMatConstruction(
             stream
         );
 
-        #if TIMING
-            cudaEventRecord(stop);
-            cudaEventSynchronize(stop);
-            float milliseconds = 0.0f;
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            std::cout << "Terma time elapsed: " << milliseconds << " [ms]" << std::endl;
-        #endif
-
-        #if TIMING
-            cudaEventRecord(start);
-        #endif
-
         fd::DoseComputeCollective(
             fmap_npixels,
             nBeamlets,
@@ -186,13 +184,6 @@ bool IMRT::DoseMatConstruction(
             kernel_h.nPhi,
             stream
         );
-
-        #if TIMING
-            cudaEventRecord(stop);
-            cudaEventSynchronize(stop);
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            std::cout << "Dose time elapsed: " << milliseconds << " [ms]" << std::endl;
-        #endif
 
         // clean up
         checkCudaErrors(cudaFree(d_DoseBEV_array));
@@ -207,20 +198,31 @@ bool IMRT::DoseMatConstruction(
         checkCudaErrors(cudaMalloc((void**)&d_dense_dose, denseDoseSize*sizeof(float)));
         checkCudaErrors(cudaMemset(d_dense_dose, 0, denseDoseSize*sizeof(float)));
         BEV2PVCSInterp(&d_dense_dose, beamlets, d_beams, density_d, 5, extent, stream);
-
         checkCudaErrors(cudaFree(d_beams));
 
-        #if false
-            size_t freeBytes, totalBytes;
-            cudaMemGetInfo(&freeBytes, &totalBytes);
-            std::cout << "Free memory: " << (float)freeBytes / (1<<30) << "GB \n"
-                "Total memory: " << (float)totalBytes / (1<<30) << "GB." << std::endl;
-        #endif
+        MatCSR& currentMat = SparseMatArray[i];
+        size_t nColumns = density_d.VolumeDim.x * density_d.VolumeDim.y * density_d.VolumeDim.z;
+        currentMat.dense2sparse(d_dense_dose, beamlets.size(), nColumns, nColumns);
+        checkCudaErrors(cudaFree(d_dense_dose));
 
-        #include "IMRTDirectInterp.cpp.in"
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&milliseconds, start, stop);
 
-        // for debug purposes
-        break;
+        size_t free_bytes, total_bytes;
+        checkCudaErrors(cudaMemGetInfo(&free_bytes, &total_bytes));
+        float free_GB = (float)free_bytes * (1.0f / 1024) * (1.0f / 1024) * (1.0f / 1024);
+        float total_GB = (float)total_bytes * (1.0f / 1024) * (1.0f / 1024) * (1.0f / 1024);
+        std::cout << std::fixed << std::setprecision(2)
+            << "Beams " << beam_bundle_idx_begin + 1 << " ~ " << beam_bundle_idx_end << " / " << beam_bundles.size()
+            << ", number of beamlets: " << nBeamlets << ", time elapsed: " << milliseconds
+            << "[ms], free memory: " << free_GB << " / " << total_GB << " GB" << std::endl;
     }
+    cudaEventRecord(globalStop);
+    cudaEventSynchronize(globalStop);
+    cudaEventElapsedTime(&milliseconds, globalStart, globalStop);
+    std::cout << std::endl << "Concurrency: " << concurrency
+        << ", total dose calculation time: "
+        << milliseconds / 1000 << "s." << std::endl;
     return 0;
 }

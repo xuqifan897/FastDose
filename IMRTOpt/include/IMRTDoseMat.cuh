@@ -50,7 +50,7 @@ namespace IMRT {
             }
         }
 
-        bool dense2sparse(float* d_dense, int num_rows, int num_cols, int ld);
+        bool dense2sparse(float* d_dense, size_t num_rows, size_t num_cols, size_t ld);
 
         cusparseSpMatDescr_t matA;
         int* d_csr_offsets;

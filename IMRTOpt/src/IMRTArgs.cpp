@@ -63,7 +63,9 @@ bool IMRT::argparse(int argc, char** argv) {
     
     // others
     ("nBeamsReserve", po::value<int>()->default_value(500),
-        "reserve space for beam allocation");
+        "Reserve space for beam allocation")
+    ("beamIdxDebug", po::value<int>()->default_value(0),
+        "For debug purposes. Which beam to use to debug");
 
     // to see if "--help" is in the argument
     if (argc == 1) {

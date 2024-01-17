@@ -115,13 +115,6 @@ bool IMRT::BEV2PVCSInterp(
         (packArrayDim.z + blockSize.z - 1) / blockSize.z
     };
 
-    #if TIMING
-        cudaEvent_t start, stop;
-        cudaEventCreate(&start);
-        cudaEventCreate(&stop);
-        cudaEventRecord(start);
-    #endif
-
     d_InterpArrayPrep<<<gridSize, blockSize, 0, stream>>>(
         d_BEVLinear,
         nBeamlets,
@@ -132,14 +125,6 @@ bool IMRT::BEV2PVCSInterp(
         BEVPitch,
         d_beamLongArray
     );
-
-    #if TIMING
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        float milliseconds = 0.0f;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        std::cout << "Array preparation time elapsed: " << milliseconds << " [ms]" << std::endl;
-    #endif
     checkCudaErrors(cudaFree(d_beamLongArray));
     checkCudaErrors(cudaFree(d_BEVSourceArray));
 
@@ -197,55 +182,15 @@ bool IMRT::BEV2PVCSInterp(
     checkCudaErrors(cudaMalloc((void**)&d_preSamplingArray, preSamplingArraySize*sizeof(bool)));
     checkCudaErrors(cudaMemset(d_preSamplingArray, 0, preSamplingArraySize*sizeof(bool)));
 
-    #if true
-        #if TIMING
-            cudaEventRecord(start);
-        #endif
-
-        d_superVoxelInterp<<<preSamplingGridSize, preSamplingBlockSize, 0, stream>>> (
-            d_preSamplingArray,
-            samplingGridSize,
-            samplingBlockSize,
-            d_beamlets,
-            nBeamlets,
-            density_d.VoxelSize,
-            extent
-        );
-
-        #if TIMING
-            cudaEventRecord(stop);
-            cudaEventSynchronize(stop);
-            milliseconds = 0.0f;
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            std::cout << "Pre-sampling time elapsed: " << milliseconds << " [ms]" << std::endl;
-        #endif
-    #else
-        checkCudaErrors(cudaMemset(d_preSamplingArray, 1, preSamplingArraySize*sizeof(bool)));
-    #endif
-
-    #if false
-        // to log the results to file for debug purposes
-        std::vector<uint8_t> h_preSamplingArray(preSamplingArraySize, false);
-        cudaMemcpy(h_preSamplingArray.data(),
-            d_preSamplingArray, preSamplingArraySize*sizeof(bool),
-            cudaMemcpyDeviceToHost);
-        fs::path outputFile(getarg<std::string>("outputFolder"));
-        outputFile /= std::string("preSamplingView.bin");
-        std::ofstream f(outputFile.string());
-        if (! f.is_open()) {
-            std::cerr << "Could not open file: " << outputFile << std::endl;
-            return 1;
-        }
-        f.write((char*)(h_preSamplingArray.data()),
-            preSamplingArraySize * sizeof(uint8_t));
-        f.close();
-        std::cout << "Number of beamlets: " << nBeamlets << std::endl
-            << "Grid size: " << make_int3(samplingGridSize) << std::endl;
-    #endif
-
-    #if TIMING
-        cudaEventRecord(start);
-    #endif
+    d_superVoxelInterp<<<preSamplingGridSize, preSamplingBlockSize, 0, stream>>> (
+        d_preSamplingArray,
+        samplingGridSize,
+        samplingBlockSize,
+        d_beamlets,
+        nBeamlets,
+        density_d.VoxelSize,
+        extent
+    );
 
     // Assume d_dense is already allocated
     d_voxelInterp<<<samplingGridSize, samplingBlockSize, 0, stream>>> (
@@ -265,14 +210,9 @@ bool IMRT::BEV2PVCSInterp(
         extent
     );
 
-    #if TIMING
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        milliseconds = 0.0f;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        std::cout << "Sampling time elapsed: " << milliseconds << " [ms]" << std::endl;
-    #endif
-
+    checkCudaErrors(cudaFree(d_preSamplingArray));
+    checkCudaErrors(cudaDestroyTextureObject(DoseBEV_Tex));
+    checkCudaErrors(cudaFreeArray(DoseBEV_Arr));
 
     return 0;
 }
@@ -372,9 +312,9 @@ IMRT::d_voxelInterp(
                     }
                 }
             }
-            d_samplingArray[voxel_idx] = local_value * inverse_ssfactor_cube;
+            size_t voxel_idx_local = voxel_idx + i * samplingPitch;
+            d_samplingArray[voxel_idx_local] = local_value * inverse_ssfactor_cube;
         }
-        voxel_idx += samplingPitch;
     }
 }
 
