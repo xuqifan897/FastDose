@@ -436,9 +436,28 @@ def viewPreSampling():
 
 def viewPVCSDose():
     folder = '/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize'
-    file = os.path.join(folder, 'DoseInterp.bin')
+    file = os.path.join(folder, 'DoseCompDebug', 'DoseDebug.bin')
     denseVolume = (149, 220, 220)
     nElementsPerVolume = denseVolume[0] * denseVolume[1] * denseVolume[2]
+
+    if True:
+        figureFolder = '/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/DoseCompView'
+        if not os.path.isdir(figureFolder):
+            os.mkdir(figureFolder)
+        with open(file, 'rb') as f:
+            file_size = f.seek(0, 2)
+            singleVolumeSize = denseVolume[0] * denseVolume[1] * denseVolume[2] * 4
+            nBeamlets = int(file_size / singleVolumeSize)
+            for i in range(nBeamlets):
+                idx_start = i * singleVolumeSize
+                f.seek(idx_start)
+                binary_data = f.read(singleVolumeSize)
+                array = np.frombuffer(binary_data, dtype=np.float32)
+                array = np.reshape(array, denseVolume)
+                proj = np.sum(array, axis=0)
+                filePath = os.path.join(figureFolder, '{:03d}.png'.format(i))
+                plt.imsave(filePath, proj)
+
 
     if False:
         totalArray = np.fromfile(file, dtype=np.float32)
@@ -456,7 +475,7 @@ def viewPVCSDose():
             plt.imsave(filename, ProjArray[i, :, :])
             print(filename)
         
-    if True:
+    if False:
         densityFile = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw"
         density = np.fromfile(densityFile, dtype=np.float32)
         density = np.reshape(density, denseVolume)
@@ -545,5 +564,5 @@ if __name__ == '__main__':
     # MaskH5Copy()
     # writeRingStruct()
     # viewPreSampling()
-    # viewPVCSDose()
-    viewBEVDose()
+    viewPVCSDose()
+    # viewBEVDose()

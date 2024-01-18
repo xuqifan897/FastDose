@@ -218,6 +218,151 @@ bool IMRT::BEV2PVCSInterp(
 }
 
 
+bool IMRT::BEV2PVCSInterp(
+    float* d_dense,
+    size_t d_dense_size,
+    const fd::d_BEAM_d* d_beamlets,
+    int nBeamlets,
+    const fd::DENSITY_d& density_d,
+    float** d_DoseArray,
+    size_t pitch,  // in float, not byte
+    bool* preSamplingArray,
+    size_t preSamplingArraySize,
+    float* packArray,
+    int2 packDim,
+    int2 fmap_size,
+    int3 packArrayDim,
+    cudaArray** DoseBEV_Arr,
+    int* d_beamletLongArray,
+    float extent,
+    cudaStream_t stream
+) {
+    checkCudaErrors(cudaMemsetAsync(d_dense, 0,
+        d_dense_size*sizeof(float), stream));
+    checkCudaErrors(cudaMemsetAsync(preSamplingArray, 0,
+        preSamplingArraySize*sizeof(bool), stream));
+
+    dim3 blockSize{8, 8, 8};
+    dim3 gridSize{
+        (packArrayDim.x + blockSize.x - 1) / blockSize.x,
+        (packArrayDim.y + blockSize.y - 1) / blockSize.y,
+        (packArrayDim.z + blockSize.z - 1) / blockSize.z
+    };
+    d_InterpArrayPrep<<<gridSize, blockSize, 0, stream>>>(
+        packArray,
+        nBeamlets,
+        packDim,
+        fmap_size,
+        packArrayDim.z,
+        d_DoseArray,
+        pitch,
+        d_beamletLongArray
+    );
+
+    #if true
+        cudaDeviceSynchronize();
+        cudaError_t cudaError = cudaGetLastError();
+        if (cudaError != cudaSuccess) {
+            std::cerr << "Error at d_InterpArrayPrep" << std::endl;
+            return 1;
+        }
+    #endif
+
+    // copy to cudaArray
+    cudaTextureObject_t DoseBEV_Tex;
+    cudaMemcpy3DParms copyParams = {0};
+    copyParams.srcPtr = make_cudaPitchedPtr(
+        (void*) packArray,
+        packArrayDim.x * sizeof(float),
+        packArrayDim.x,
+        packArrayDim.y);
+    copyParams.dstArray = *DoseBEV_Arr;
+    copyParams.extent = make_cudaExtent(
+        packArrayDim.x, packArrayDim.y, packArrayDim.z);
+    copyParams.kind = cudaMemcpyDeviceToDevice;
+    checkCudaErrors(cudaMemcpy3D(&copyParams));
+
+    cudaResourceDesc texRes;
+    memset(&texRes, 0, sizeof(cudaResourceDesc));
+    texRes.resType = cudaResourceTypeArray;
+    texRes.res.array.array = *DoseBEV_Arr;
+
+    cudaTextureDesc texDescr;
+    memset(&texDescr, 0, sizeof(cudaTextureDesc));
+    texDescr.normalizedCoords = false;
+    texDescr.addressMode[0] = cudaAddressModeBorder;
+    texDescr.addressMode[1] = cudaAddressModeBorder;
+    texDescr.addressMode[2] = cudaAddressModeBorder;
+    checkCudaErrors(cudaCreateTextureObject(&DoseBEV_Tex, &texRes, &texDescr, nullptr));
+
+
+    // prepare for interpolation. Here we utilize a two-stage algorithm.
+    // In the first stage, we calculate the "super voxels" that contain
+    // non-trivial voxels. Then we calculate the interpolated valus for
+    // these voxels
+    const uint3& densityDim = density_d.VolumeDim;
+    dim3 samplingBlockSize{8, 8, 8};
+    dim3 samplingGridSize {
+        (densityDim.x - 1 + samplingBlockSize.x) / samplingBlockSize.x,
+        (densityDim.y - 1 + samplingBlockSize.y) / samplingBlockSize.y,
+        (densityDim.z - 1 + samplingBlockSize.z) / samplingBlockSize.z };
+    
+    dim3 preSamplingBlockSize{4, 4, 4};
+    dim3 preSamplingGridSize {
+        (samplingGridSize.x - 1 + preSamplingBlockSize.x) / preSamplingBlockSize.x,
+        (samplingGridSize.y - 1 + preSamplingBlockSize.y) / preSamplingBlockSize.y,
+        (samplingGridSize.z - 1 + preSamplingBlockSize.z) / preSamplingBlockSize.z };
+    
+    d_superVoxelInterp<<<preSamplingGridSize, preSamplingBlockSize, 0, stream>>> (
+        preSamplingArray,
+        samplingGridSize,
+        samplingBlockSize,
+        d_beamlets,
+        nBeamlets,
+        density_d.VoxelSize,
+        extent
+    );
+
+    #if true
+        cudaDeviceSynchronize();
+        cudaError = cudaGetLastError();
+        if (cudaError != cudaSuccess) {
+            std::cerr << "Error at d_superVoxelInterp" << std::endl;
+            return 1;
+        }
+    #endif
+
+    d_voxelInterp<<<samplingGridSize, samplingBlockSize, 0, stream>>> (
+        d_dense,
+        preSamplingArray,
+        densityDim,
+        density_d.VoxelSize,
+        samplingGridSize,
+        samplingBlockSize,
+
+        d_beamlets,
+        nBeamlets,
+        DoseBEV_Tex,
+        packDim,
+        fmap_size,
+        5,
+        extent
+    );
+
+    #if true
+        cudaDeviceSynchronize();
+        cudaError = cudaGetLastError();
+        if (cudaError != cudaSuccess) {
+            std::cerr << "Error at d_voxelInterp" << std::endl;
+            return 1;
+        }
+    #endif
+
+    checkCudaErrors(cudaDestroyTextureObject(DoseBEV_Tex));
+    return 0;
+}
+
+
 __global__ void
 IMRT::d_voxelInterp(
     float* d_samplingArray,

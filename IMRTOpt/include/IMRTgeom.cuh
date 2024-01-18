@@ -11,6 +11,26 @@ namespace IMRT {
         float extent = 2.0f, cudaStream_t stream=0
     );
 
+    bool BEV2PVCSInterp(
+        float* d_dense,
+        size_t d_dense_size,  // in float, not byte
+        const fastdose::d_BEAM_d* d_beamlets,
+        int nBeamlets,
+        const fastdose::DENSITY_d& density_d,
+        float** d_DoseArray,
+        size_t pitch,  // in float, not byte
+        bool* preSamplingArray,
+        size_t preSamplingArraySize,
+        float* packArray,
+        int2 packDim,
+        int2 fmap_size,
+        int3 packArrayDim,
+        cudaArray** DoseBEV_Arr,
+        int* d_beamletLongArray,
+        float extent,
+        cudaStream_t stream = 0
+    );
+
     __global__ void
     d_InterpArrayPrep (
         float* d_BEVLinear,

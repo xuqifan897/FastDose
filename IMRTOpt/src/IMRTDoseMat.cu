@@ -1,5 +1,7 @@
 #include <fstream>
+#include <string>
 #include <iomanip>
+#include <limits>
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
 
@@ -83,146 +85,236 @@ bool IMRT::DoseMatConstruction(
     checkCudaErrors(cudaEventCreate(&globalStop));
     float milliseconds;
 
-    // firstly, calculate Terma and Dose
     int concurrency = getarg<int>("concurrency");
     float extent = getarg<float>("extent");
     int iterations = (beam_bundles.size() + concurrency - 1) / concurrency;
     SparseMatArray.resize(iterations);
 
-    cudaEventRecord(globalStart);
+    // get the maximum number of beamlets, and the maximum beamlet length
+    int maxNumBeamletsPerBatch = 0;
+    int maxBeamletLength = 0;
     for (int i=0; i<iterations; i++) {
-        cudaEventRecord(start);
-
-        std::vector<fd::BEAM_d> beamlets;
+        int localNumBeamlets = 0;
         int beam_bundle_idx_begin = i * concurrency;
         int beam_bundle_idx_end = (i + 1) * concurrency;
         beam_bundle_idx_end = min(beam_bundle_idx_end, (int)(beam_bundles.size()));
-
-        int nBeamlets = 0;
         for (int j=beam_bundle_idx_begin; j<beam_bundle_idx_end; j++) {
-            nBeamlets += beam_bundles[j].beams_h.size();
+            localNumBeamlets += beam_bundles[j].beams_h.size();
+            for (int k=0; k<beam_bundles[j].beams_h.size(); k++)
+                maxBeamletLength = max(maxBeamletLength, beam_bundles[j].beams_h[k].long_dim);
         }
-        beamlets.resize(nBeamlets);
-        int count = 0;
+        maxNumBeamletsPerBatch = max(maxNumBeamletsPerBatch, localNumBeamlets);
+    }
+    std::cout << std::endl << "Maximum number of beamlets per batch: " << maxNumBeamletsPerBatch
+        << ", maximum beamlet length: " << maxBeamletLength << std::endl << std::endl;
+    
+    // allocate working buffers
+    uint3 densityDim = density_d.VolumeDim;
+    // for safty check
+    unsigned long long denseDoseMatSize_ = maxNumBeamletsPerBatch * densityDim.x * densityDim.y * densityDim.z;
+    if (denseDoseMatSize_ > std::numeric_limits<size_t>::max()) {
+        std::cerr << "The size of the dense dose matrix is " << denseDoseMatSize_
+            << ", which is beyond the range size_t can represent. "
+            "Please reduce the concurrency parameter" << std::endl;
+        return 1;
+    }
+    size_t denseDoseMatSize = maxNumBeamletsPerBatch * densityDim.x * densityDim.y * densityDim.z;
+    float* d_denseDoseMat = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_denseDoseMat, denseDoseMatSize*sizeof(float)));
+
+    fd::d_BEAM_d* d_BeamletsBuffer = nullptr;
+    float* d_FluenceBuffer = nullptr;
+    float* d_DensityBEVBuffer = nullptr;
+    float* d_TeramBEVBuffer = nullptr;
+    float* d_DoseBEVBuffer = nullptr;
+    int subFluenceDim = getarg<int>("subFluenceDim");
+    int subFluenceOn = getarg<int>("subFluenceOn");
+    size_t bufferSize = maxNumBeamletsPerBatch * subFluenceDim * subFluenceDim * maxBeamletLength;
+    checkCudaErrors(cudaMalloc((void**)(&d_BeamletsBuffer),
+        maxNumBeamletsPerBatch * sizeof(fd::d_BEAM_d)));
+    checkCudaErrors(cudaMalloc((void**)(&d_FluenceBuffer), maxNumBeamletsPerBatch
+        * subFluenceDim * subFluenceDim * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&d_DensityBEVBuffer, bufferSize*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&d_TeramBEVBuffer, bufferSize*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&d_DoseBEVBuffer, bufferSize*sizeof(float)));
+
+    // Fluence buffer can be initialized before-hands
+    std::vector<float> h_FluenceBuffer(maxNumBeamletsPerBatch * subFluenceDim * subFluenceDim);
+    std::vector<float> h_SingleFluence(subFluenceDim * subFluenceDim, 0.0f);
+    int FmapLeadingX = static_cast<int>((subFluenceDim - subFluenceOn) * 0.5f);
+    int FmapLeadingY = FmapLeadingX;
+    for (int j=FmapLeadingY; j<FmapLeadingY + subFluenceOn; j++) {
+        for (int i=FmapLeadingX; i<FmapLeadingX + subFluenceOn; i++) {
+            int idx = i + j * subFluenceDim;
+            h_SingleFluence[idx] = 1.0f;
+        }
+    }
+    for (int j=0; j<maxNumBeamletsPerBatch; j++) {
+        size_t globalOffset = j * subFluenceDim * subFluenceDim;
+        for (int i=0; i<subFluenceDim*subFluenceDim; i++) {
+            h_FluenceBuffer[i + globalOffset] = h_SingleFluence[i];
+        }
+    }
+    checkCudaErrors(cudaMemcpy(d_FluenceBuffer, h_FluenceBuffer.data(),
+        maxNumBeamletsPerBatch*subFluenceDim*subFluenceDim*sizeof(float),
+        cudaMemcpyHostToDevice));
+
+
+    // buffer array
+    std::vector<float*> h_FluenceArray(maxNumBeamletsPerBatch, nullptr);
+    for (int i=0; i<maxNumBeamletsPerBatch; i++)
+        h_FluenceArray[i] = d_FluenceBuffer + i * subFluenceDim * subFluenceDim;
+    std::vector<float*> h_DensityArray(maxNumBeamletsPerBatch, nullptr);
+    std::vector<float*> h_TermaArray(maxNumBeamletsPerBatch, nullptr);
+    std::vector<float*> h_DoseArray(maxNumBeamletsPerBatch, nullptr);
+    for (int i=0; i<maxNumBeamletsPerBatch; i++) {
+        size_t offset = i * subFluenceDim * subFluenceDim * maxBeamletLength;
+        h_DensityArray[i] = d_DensityBEVBuffer + offset;
+        h_TermaArray[i] = d_TeramBEVBuffer + offset;
+        h_DoseArray[i] = d_DoseBEVBuffer + offset;
+    }
+    float** d_FluenceArray = nullptr;
+    float** d_DensityArray = nullptr;
+    float** d_TermaArray = nullptr;
+    float** d_DoseArray = nullptr;
+    checkCudaErrors(cudaMalloc((void***)&d_FluenceArray, maxNumBeamletsPerBatch*sizeof(float*)));
+    checkCudaErrors(cudaMalloc((void***)&d_DensityArray, maxNumBeamletsPerBatch*sizeof(float*)));
+    checkCudaErrors(cudaMalloc((void***)&d_TermaArray, maxNumBeamletsPerBatch*sizeof(float*)));
+    checkCudaErrors(cudaMalloc((void***)&d_DoseArray, maxNumBeamletsPerBatch*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(d_FluenceArray, h_FluenceArray.data(),
+        maxNumBeamletsPerBatch*sizeof(float*), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_DensityArray, h_DensityArray.data(),
+        maxNumBeamletsPerBatch*sizeof(float*), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_TermaArray, h_TermaArray.data(),
+        maxNumBeamletsPerBatch*sizeof(float*), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_DoseArray, h_DoseArray.data(),
+        maxNumBeamletsPerBatch*sizeof(float*), cudaMemcpyHostToDevice));
+
+    // pack array
+    int2 packDim;
+    packDim.x = (int)ceilf(sqrtf((float)maxNumBeamletsPerBatch));
+    packDim.y = (int)ceilf((float)maxNumBeamletsPerBatch / packDim.x);
+    int3 packArrayDim {
+        packDim.x * subFluenceDim,
+        packDim.y * subFluenceDim,
+        maxBeamletLength };
+    size_t packArraySize = packArrayDim.x * packArrayDim.y * packArrayDim.z;
+    float* packArray = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&packArray, packArraySize*sizeof(float)));
+
+    // for sampling
+    dim3 samplingBlockSize{8, 8, 8};
+    dim3 samplingGridSize {
+        (densityDim.x - 1 + samplingBlockSize.x) / samplingBlockSize.x,
+        (densityDim.y - 1 + samplingBlockSize.y) / samplingBlockSize.y,
+        (densityDim.z - 1 + samplingBlockSize.z) / samplingBlockSize.z
+    };
+    size_t preSamplingGridSize = samplingGridSize.x * samplingGridSize.y
+        * samplingGridSize.z * maxNumBeamletsPerBatch;
+    bool* d_preSamplingArray = nullptr;
+    checkCudaErrors(cudaMalloc((void**)(&d_preSamplingArray), preSamplingGridSize*sizeof(bool)));
+
+    // the array to store the long_dim of each beamlets
+    int* d_beamletLongArray = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_beamletLongArray, maxNumBeamletsPerBatch*sizeof(int)));
+
+    // prepare texture components
+    cudaArray* DoseBEV_Arr;
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+    cudaExtent volumeSize = make_cudaExtent(packArrayDim.x, packArrayDim.y, packArrayDim.z);
+    cudaMalloc3DArray(&DoseBEV_Arr, &channelDesc, volumeSize);
+
+    for (int i=0; i<iterations; i++) {
+        // firstly, prepare beamlet information
+        int localNumBeamlets = 0;
+        int beam_bundle_idx_begin = i * concurrency;
+        int beam_bundle_idx_end = (i + 1) * concurrency;
+        beam_bundle_idx_end = min(beam_bundle_idx_end, (int)(beam_bundles.size()));
+        for (int j=beam_bundle_idx_begin; j<beam_bundle_idx_end; j++)
+            localNumBeamlets += beam_bundles[j].beams_h.size();
+        
+        std::vector<fd::d_BEAM_d> h_BeamletsBuffer;
+        std::vector<int> h_beamletLongArray;
+        h_BeamletsBuffer.reserve(localNumBeamlets);
+        h_beamletLongArray.reserve(localNumBeamlets);
+        size_t pitch = subFluenceDim * subFluenceDim * sizeof(float);
         for (int j=beam_bundle_idx_begin; j<beam_bundle_idx_end; j++) {
-            auto& current = beam_bundles[j];
-            for (int k=0; k<current.beams_h.size(); k++) {
-                fd::beam_h2d(current.beams_h[k], beamlets[count]);
-                count ++;
+            for (int k=0; k<beam_bundles[j].beams_h.size(); k++) {
+                const fd::BEAM_h& h_source = beam_bundles[j].beams_h[k];
+                h_BeamletsBuffer.push_back(fd::d_BEAM_d(h_source, pitch, pitch));
+                h_beamletLongArray.push_back(h_source.long_dim);
             }
         }
-
-        // preparation
-        std::vector<fd::d_BEAM_d> h_beams;
-        h_beams.reserve(nBeamlets);
-        for (int j=0; j<nBeamlets; j++) {
-            h_beams.push_back(fd::d_BEAM_d(beamlets[j]));
-        }
-        fd::d_BEAM_d* d_beams = nullptr;
-        checkCudaErrors(cudaMalloc((void**)(&d_beams), nBeamlets*sizeof(fd::d_BEAM_d)));
-        checkCudaErrors(cudaMemcpy(d_beams, h_beams.data(),
-            nBeamlets*sizeof(fd::d_BEAM_d), cudaMemcpyHostToDevice));
-
-        // allocate fluence array
-        std::vector<float*> h_fluence_array(nBeamlets, nullptr);
-        for (int j=0; j<nBeamlets; j++)
-            h_fluence_array[j] = beamlets[j].fluence;
-        float** d_fluence_array = nullptr;
-        checkCudaErrors(cudaMalloc((void***)(&d_fluence_array), nBeamlets*sizeof(float*)));
-        checkCudaErrors(cudaMemcpy(d_fluence_array, h_fluence_array.data(),
-            nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
-
-        // allocate Terma_array
-        std::vector<float*> h_TermaBEV_array(nBeamlets, nullptr);
-        for (int j=0; j<nBeamlets; j++)
-            h_TermaBEV_array[j] = beamlets[j].TermaBEV;
-        float** d_TermaBEV_array = nullptr;
-        checkCudaErrors(cudaMalloc((void***)(&d_TermaBEV_array), nBeamlets*sizeof(float*)));
-        checkCudaErrors(cudaMemcpy(d_TermaBEV_array, h_TermaBEV_array.data(),
-            nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
-
-        // allocate DenseBEV_array
-        std::vector<float*> h_DensityBEV_array(nBeamlets, nullptr);
-        for (int j=0; j<nBeamlets; j++)
-            h_DensityBEV_array[j] = beamlets[j].DensityBEV;
-        float** d_DensityBEV_array = nullptr;
-        checkCudaErrors(cudaMalloc((void***)(&d_DensityBEV_array), nBeamlets*sizeof(float*)));
-        checkCudaErrors(cudaMemcpy(d_DensityBEV_array, h_DensityBEV_array.data(),
-            nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpyAsync(d_BeamletsBuffer, h_BeamletsBuffer.data(),
+            localNumBeamlets*sizeof(fd::d_BEAM_d), cudaMemcpyHostToDevice, stream));
+        checkCudaErrors(cudaMemcpyAsync(d_beamletLongArray, h_beamletLongArray.data(),
+            localNumBeamlets*sizeof(int), cudaMemcpyHostToDevice, stream));
         
-        // allocate DoseBEV_array
-        std::vector<float*> h_DoseBEV_array(nBeamlets, nullptr);
-        for (int j=0; j<nBeamlets; j++)
-            h_DoseBEV_array[j] = beamlets[j].DoseBEV;
-        float** d_DoseBEV_array = nullptr;
-        checkCudaErrors(cudaMalloc((void***)(&d_DoseBEV_array), nBeamlets*sizeof(float*)));
-        checkCudaErrors(cudaMemcpy(d_DoseBEV_array, h_DoseBEV_array.data(),
-            nBeamlets*sizeof(float*), cudaMemcpyHostToDevice));
-
-        size_t fmap_npixels = beamlets[0].fmap_size.x * beamlets[0].fmap_size.y;
-
+        // Calculate Terma
+        size_t fmap_npixels = subFluenceDim * subFluenceDim;
         fd::TermaComputeCollective(
             fmap_npixels,
-            nBeamlets,
-            d_beams,
-            d_fluence_array,
-            d_TermaBEV_array,
-            d_DensityBEV_array,
+            localNumBeamlets,
+            d_BeamletsBuffer,
+            d_FluenceArray,
+            d_TermaArray,
+            d_DensityArray,
             density_d,
             spectrum_h,
             stream
         );
-
+        
+        // Calculate Dose
         fd::DoseComputeCollective(
             fmap_npixels,
-            nBeamlets,
-            d_beams,
-            d_TermaBEV_array,
-            d_DensityBEV_array,
-            d_DoseBEV_array,
+            localNumBeamlets,
+            d_BeamletsBuffer,
+            d_TermaArray,
+            d_DensityArray,
+            d_DoseArray,
             kernel_h.nTheta,
             kernel_h.nPhi,
+            stream);
+        
+        // Copy the result to packed array
+        BEV2PVCSInterp(
+            d_denseDoseMat,
+            denseDoseMatSize,
+            d_BeamletsBuffer,
+            localNumBeamlets,
+            density_d,
+            d_DoseArray,
+            pitch / sizeof(float),
+            d_preSamplingArray,
+            preSamplingGridSize,
+            packArray,
+            packDim,
+            make_int2(subFluenceDim, subFluenceDim),
+            packArrayDim,
+            &DoseBEV_Arr,
+            d_beamletLongArray,
+            extent,
             stream
         );
-
-        // clean up
-        checkCudaErrors(cudaFree(d_DoseBEV_array));
-        checkCudaErrors(cudaFree(d_DensityBEV_array));
-        checkCudaErrors(cudaFree(d_TermaBEV_array));
-        checkCudaErrors(cudaFree(d_fluence_array));
-        
-        float* d_dense_dose;
-        size_t denseDoseSize = density_d.VolumeDim.x
-            * density_d.VolumeDim.y * density_d.VolumeDim.z
-            * beamlets.size();
-        checkCudaErrors(cudaMalloc((void**)&d_dense_dose, denseDoseSize*sizeof(float)));
-        checkCudaErrors(cudaMemset(d_dense_dose, 0, denseDoseSize*sizeof(float)));
-        BEV2PVCSInterp(&d_dense_dose, beamlets, d_beams, density_d, 5, extent, stream);
-        checkCudaErrors(cudaFree(d_beams));
-
-        MatCSR& currentMat = SparseMatArray[i];
-        size_t nColumns = density_d.VolumeDim.x * density_d.VolumeDim.y * density_d.VolumeDim.z;
-        currentMat.dense2sparse(d_dense_dose, beamlets.size(), nColumns, nColumns);
-        checkCudaErrors(cudaFree(d_dense_dose));
-
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&milliseconds, start, stop);
-
-        size_t free_bytes, total_bytes;
-        checkCudaErrors(cudaMemGetInfo(&free_bytes, &total_bytes));
-        float free_GB = (float)free_bytes * (1.0f / 1024) * (1.0f / 1024) * (1.0f / 1024);
-        float total_GB = (float)total_bytes * (1.0f / 1024) * (1.0f / 1024) * (1.0f / 1024);
-        std::cout << std::fixed << std::setprecision(2)
-            << "Beams " << beam_bundle_idx_begin + 1 << " ~ " << beam_bundle_idx_end << " / " << beam_bundles.size()
-            << ", number of beamlets: " << nBeamlets << ", time elapsed: " << milliseconds
-            << "[ms], free memory: " << free_GB << " / " << total_GB << " GB" << std::endl;
     }
-    cudaEventRecord(globalStop);
-    cudaEventSynchronize(globalStop);
-    cudaEventElapsedTime(&milliseconds, globalStart, globalStop);
-    std::cout << std::endl << "Concurrency: " << concurrency
-        << ", total dose calculation time: "
-        << milliseconds / 1000 << "s." << std::endl;
+
+    // clean up
+    checkCudaErrors(cudaFreeArray(DoseBEV_Arr));
+    checkCudaErrors(cudaFree(d_beamletLongArray));
+    checkCudaErrors(cudaFree(d_preSamplingArray));
+    checkCudaErrors(cudaFree(packArray));
+
+    checkCudaErrors(cudaFree(d_DoseArray));
+    checkCudaErrors(cudaFree(d_TermaArray));
+    checkCudaErrors(cudaFree(d_DensityArray));
+    checkCudaErrors(cudaFree(d_FluenceArray));
+
+    checkCudaErrors(cudaFree(d_DoseBEVBuffer));
+    checkCudaErrors(cudaFree(d_TeramBEVBuffer));
+    checkCudaErrors(cudaFree(d_DensityBEVBuffer));
+    checkCudaErrors(cudaFree(d_FluenceBuffer));
+    checkCudaErrors(cudaFree(d_BeamletsBuffer));
+
+    checkCudaErrors(cudaFree(d_denseDoseMat));
     return 0;
 }

@@ -101,6 +101,22 @@ namespace fastdose {
             DensityBEV_pitch(old.DensityBEV_pitch)
         {}
 
+        d_BEAM_d(const BEAM_h& old, size_t TermaBEV_pitch_, size_t DensityBEV_pitch_):
+            isocenter(old.isocenter),
+            beamlet_size(old.beamlet_size),
+            fmap_size(old.fmap_size),
+            sad(old.sad),
+            angles(old.angles),
+            long_spacing(old.long_spacing),
+
+            lim_min(old.lim_min),
+            lim_max(old.lim_max),
+            long_dim(old.long_dim),
+            source(old.source),
+            TermaBEV_pitch(TermaBEV_pitch_),
+            DensityBEV_pitch(DensityBEV_pitch_)
+        {}
+
         float3 isocenter;
         float2 beamlet_size;
         uint2 fmap_size;
