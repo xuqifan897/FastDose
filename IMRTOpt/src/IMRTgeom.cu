@@ -235,12 +235,16 @@ bool IMRT::BEV2PVCSInterp(
     cudaArray** DoseBEV_Arr,
     int* d_beamletLongArray,
     float extent,
-    cudaStream_t stream
+    cudaStream_t stream,
+    cudaStream_t memsetStream
 ) {
     checkCudaErrors(cudaMemsetAsync(d_dense, 0,
-        d_dense_size*sizeof(float), stream));
+        d_dense_size*sizeof(float), memsetStream));
     checkCudaErrors(cudaMemsetAsync(preSamplingArray, 0,
-        preSamplingArraySize*sizeof(bool), stream));
+        preSamplingArraySize*sizeof(bool), memsetStream));
+    
+    cudaStreamSynchronize(stream);
+    cudaStreamSynchronize(memsetStream);
 
     dim3 blockSize{8, 8, 8};
     dim3 gridSize{
@@ -259,7 +263,7 @@ bool IMRT::BEV2PVCSInterp(
         d_beamletLongArray
     );
 
-    #if true
+    #if false
         cudaDeviceSynchronize();
         cudaError_t cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
@@ -323,7 +327,7 @@ bool IMRT::BEV2PVCSInterp(
         extent
     );
 
-    #if true
+    #if false
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
@@ -349,7 +353,7 @@ bool IMRT::BEV2PVCSInterp(
         extent
     );
 
-    #if true
+    #if false
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {

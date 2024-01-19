@@ -28,7 +28,8 @@ namespace IMRT {
         cudaArray** DoseBEV_Arr,
         int* d_beamletLongArray,
         float extent,
-        cudaStream_t stream = 0
+        cudaStream_t stream = 0,
+        cudaStream_t memsetStream = 0
     );
 
     __global__ void

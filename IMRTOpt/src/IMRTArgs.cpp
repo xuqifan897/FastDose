@@ -56,6 +56,8 @@ bool IMRT::argparse(int argc, char** argv) {
     ("extent", po::value<float>()->default_value(2.0f),
         "Used in dose interpolation, i.e., the dose from BEV to PVCS. For voxels "
         "farther than the distance, the dose is 0 [cm]")
+    ("EstNonZeroElementsPerMat", po::value<size_t>()->default_value(6000000),
+        "Estimated number of non-zero elements per beam. Used to allocate the buffer")
         
     // io
     ("outputFolder", po::value<std::string>()->required(),

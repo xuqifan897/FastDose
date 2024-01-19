@@ -11,63 +11,6 @@ namespace fs = boost::filesystem;
 
 namespace fd = fastdose;
 
-bool IMRT::MatCSR::dense2sparse(
-    float* d_dense, size_t num_rows, size_t num_cols, size_t ld
-) {
-    checkCudaErrors(cudaMalloc((void**)(&this->d_csr_offsets),
-        (num_rows + 1) * sizeof(int)));
-    
-    cusparseHandle_t handle = nullptr;
-    cusparseDnMatDescr_t matDense;
-    void* dBufferConstruct = nullptr;
-    size_t bufferSize = 0;
-
-    checkCusparse(cusparseCreate(&handle))
-
-    checkCusparse(cusparseCreateDnMat(
-        &matDense, num_rows, num_cols, ld,
-        d_dense, CUDA_R_32F, CUSPARSE_ORDER_ROW))
-
-    checkCusparse(cusparseCreateCsr(
-        &(this->matA), num_rows, num_cols, 0,
-        d_csr_offsets, nullptr, nullptr,
-        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-        CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F))
-    
-    // allocate an external buffer if needed
-    checkCusparse(cusparseDenseToSparse_bufferSize(
-        handle, matDense, this->matA,
-        CUSPARSE_DENSETOSPARSE_ALG_DEFAULT,
-        &bufferSize))
-    checkCudaErrors(cudaMalloc((void**) &dBufferConstruct, bufferSize));
-    
-    // execute Dense to Sparse conversion
-    checkCusparse(cusparseDenseToSparse_analysis(
-        handle, matDense, this->matA,
-        CUSPARSE_DENSETOSPARSE_ALG_DEFAULT, dBufferConstruct))
-
-    // get the number of non-zero elements
-    int64_t num_rows_tmp, num_cols_tmp;
-    checkCusparse(cusparseSpMatGetSize(
-        this->matA, &num_rows_tmp, &num_cols_tmp, &(this->nnz)))
-    
-    // allocate CSR column indices and values
-    checkCudaErrors(cudaMalloc((void**) &(this->d_csr_columns), nnz*sizeof(int)));
-    checkCudaErrors(cudaMalloc((void**) &(this->d_csr_values), nnz*sizeof(float)));
-    // reset offsets, column indices, and values pointers
-    checkCusparse(cusparseCsrSetPointers(this->matA,
-        this->d_csr_offsets, this->d_csr_columns, this->d_csr_values))
-    
-    // execute Dense to Sparse conversion
-    checkCusparse(cusparseDenseToSparse_convert(handle, matDense, this->matA,
-        CUSPARSE_DENSETOSPARSE_ALG_DEFAULT, dBufferConstruct))
-    
-    checkCudaErrors(cudaFree(dBufferConstruct));
-    checkCusparse(cusparseDestroyDnMat(matDense))
-    checkCusparse(cusparseDestroy(handle))
-    return 0;
-}
-
 bool IMRT::DoseMatConstruction(
     std::vector<BeamBundle>& beam_bundles,
     fd::DENSITY_d& density_d,
@@ -75,9 +18,6 @@ bool IMRT::DoseMatConstruction(
     fd::KERNEL_h& kernel_h,
     cudaStream_t stream
 ) {
-    // prepare the sparse dose matrices
-    std::vector<MatCSR> SparseMatArray;
-
     cudaEvent_t start, stop, globalStart, globalStop;
     checkCudaErrors(cudaEventCreate(&start));
     checkCudaErrors(cudaEventCreate(&stop));
@@ -88,7 +28,7 @@ bool IMRT::DoseMatConstruction(
     int concurrency = getarg<int>("concurrency");
     float extent = getarg<float>("extent");
     int iterations = (beam_bundles.size() + concurrency - 1) / concurrency;
-    SparseMatArray.resize(iterations);
+    std::vector<size_t> numRowsPerMat(iterations, 0);
 
     // get the maximum number of beamlets, and the maximum beamlet length
     int maxNumBeamletsPerBatch = 0;
@@ -104,15 +44,22 @@ bool IMRT::DoseMatConstruction(
                 maxBeamletLength = max(maxBeamletLength, beam_bundles[j].beams_h[k].long_dim);
         }
         maxNumBeamletsPerBatch = max(maxNumBeamletsPerBatch, localNumBeamlets);
+        numRowsPerMat[i] = localNumBeamlets;
     }
     std::cout << std::endl << "Maximum number of beamlets per batch: " << maxNumBeamletsPerBatch
         << ", maximum beamlet length: " << maxBeamletLength << std::endl << std::endl;
-    
-    // allocate working buffers
+
+    // prepare the sparse dose matrices
     uint3 densityDim = density_d.VolumeDim;
+    size_t numDensityVoxels = densityDim.x * densityDim.y * densityDim.z;
+    size_t EstNonZeroElementsPerMat = getarg<size_t>("EstNonZeroElementsPerMat");
+    size_t estBufferSize = EstNonZeroElementsPerMat * beam_bundles.size();
+    MatCSREnsemble matEns(numRowsPerMat, numDensityVoxels, estBufferSize);
+
+    // allocate working buffers
     // for safty check
     unsigned long long denseDoseMatSize_ = maxNumBeamletsPerBatch * densityDim.x * densityDim.y * densityDim.z;
-    if (denseDoseMatSize_ > std::numeric_limits<size_t>::max()) {
+    if (denseDoseMatSize_ > std::numeric_limits<uint>::max()) {
         std::cerr << "The size of the dense dose matrix is " << denseDoseMatSize_
             << ", which is beyond the range size_t can represent. "
             "Please reduce the concurrency parameter" << std::endl;
@@ -224,7 +171,15 @@ bool IMRT::DoseMatConstruction(
     cudaExtent volumeSize = make_cudaExtent(packArrayDim.x, packArrayDim.y, packArrayDim.z);
     cudaMalloc3DArray(&DoseBEV_Arr, &channelDesc, volumeSize);
 
+    // create a stream for memory reset, so that it can overlap computation and memory operations
+    cudaStream_t memsetStream;
+    checkCudaErrors(cudaStreamCreate(&memsetStream));
+
+    cudaEventRecord(globalStart);
+    // for debug purposes
     for (int i=0; i<iterations; i++) {
+        cudaEventRecord(start);
+
         // firstly, prepare beamlet information
         int localNumBeamlets = 0;
         int beam_bundle_idx_begin = i * concurrency;
@@ -294,9 +249,26 @@ bool IMRT::DoseMatConstruction(
             &DoseBEV_Arr,
             d_beamletLongArray,
             extent,
-            stream
+            stream,
+            memsetStream
         );
+
+        matEns.addMat(d_denseDoseMat, localNumBeamlets, numDensityVoxels);
+
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        std::cout << "Iteration: " << i << ", beam bundle indices: "
+            << beam_bundle_idx_begin << " ~ " << beam_bundle_idx_end - 1
+            << " / " << beam_bundles.size() << ", time elapsed: "
+            << milliseconds << " [ms]" << std::endl;
     }
+    checkCudaErrors(cudaStreamDestroy(memsetStream));
+
+    cudaEventRecord(globalStop);
+    cudaEventSynchronize(globalStop);
+    cudaEventElapsedTime(&milliseconds, globalStart, globalStop);
+    std::cout << "Dose calculation time: " << milliseconds * 0.001f << " s" << std::endl;
 
     // clean up
     checkCudaErrors(cudaFreeArray(DoseBEV_Arr));
@@ -316,5 +288,19 @@ bool IMRT::DoseMatConstruction(
     checkCudaErrors(cudaFree(d_BeamletsBuffer));
 
     checkCudaErrors(cudaFree(d_denseDoseMat));
+
+    checkCudaErrors(cudaEventDestroy(globalStop));
+    checkCudaErrors(cudaEventDestroy(globalStart));
+    checkCudaErrors(cudaEventDestroy(stop));
+    checkCudaErrors(cudaEventDestroy(start));
+
+
+    #if true
+        // for debug purposes
+        fs::path resultFolder(getarg<std::string>("outputFolder"));
+        resultFolder /= std::string("doseMatFolder");
+        matEns.tofile(resultFolder.string());
+    #endif
+
     return 0;
 }

@@ -78,11 +78,11 @@ if false; then
         --structureInfo "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
         --params "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
         --beamlist "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
-        --deviceIdx 2 \
+        --deviceIdx 3 \
         --spectrum "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
         --kernel "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
         --subFluenceDim 16 \
-        --concurrency 4 \
-        --outputFolder "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize" \
+        --concurrency 1 \
+        --outputFolder ${outputFolder} \
         --nBeamsReserve 452
 fi
