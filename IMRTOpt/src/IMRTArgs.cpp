@@ -32,6 +32,11 @@ bool IMRT::argparse(int argc, char** argv) {
         "The path to the beamlist")
     
     // dose calculation
+    ("mode", po::value<int>()->default_value(0),
+        "0 for dose calculation and store the result, \n"
+        "1 for dose calculation and do beam orientation optimization, \n"
+        "2 for beam orientation optimization using the pre-calculated dose (0). \n"
+        "Dose is stored in the subdirectory \"doseMatFolder\" of the \"outputFolder\".")
     ("deviceIdx", po::value<int>()->default_value(2),
         "The device index")
     ("spectrum", po::value<std::string>()->required(),

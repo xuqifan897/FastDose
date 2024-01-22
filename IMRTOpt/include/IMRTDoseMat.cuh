@@ -21,6 +21,8 @@
 }
 
 namespace IMRT {
+    class MatCSREnsemble;
+
     class MatCSR {
     public:
         MatCSR() : matA(nullptr), d_csr_offsets(nullptr),
@@ -51,10 +53,11 @@ namespace IMRT {
         }
 
         bool dense2sparse(float* d_dense, size_t num_rows, size_t num_cols, size_t ld);
+        bool fuseEnsemble(MatCSREnsemble& matEns);
 
         cusparseSpMatDescr_t matA;
-        int* d_csr_offsets;
-        int* d_csr_columns;
+        size_t* d_csr_offsets;
+        size_t* d_csr_columns;
         float* d_csr_values;
         void* d_buffer_spmv;
         int64_t nnz;
@@ -69,11 +72,23 @@ namespace IMRT {
             size_t estBufferSize  // estimated buffer size, in elements, not b
         );
 
+        MatCSREnsemble(size_t numColsPerMat_):
+            numColsPerMat(numColsPerMat_),
+            d_offsetsBuffer(nullptr),
+            d_columnsBuffer(nullptr),
+            d_valuesBuffer(nullptr),
+            d_constructBuffer(nullptr)
+        {}
+
         ~MatCSREnsemble();
 
         bool addMat(float* d_dense, size_t numRows, size_t numCols);
         bool tofile(const std::string& resultFolder);
         bool fromfile(const std::string& resultFolder);
+        friend bool sparseValidation(const MatCSREnsemble* matEns);
+        friend bool conversionValidation(
+            const MatCSR& mat, const MatCSREnsemble& matEns);
+        friend MatCSR;
 
     private:
         std::vector<cusparseSpMatDescr_t> matA_array;
@@ -103,6 +118,7 @@ namespace IMRT {
         fastdose::DENSITY_d& density_d,
         fastdose::SPECTRUM_h& spectrum_h,
         fastdose::KERNEL_h& kernel_h,
+        MatCSREnsemble** matEns,
         cudaStream_t stream=0
     );
 }

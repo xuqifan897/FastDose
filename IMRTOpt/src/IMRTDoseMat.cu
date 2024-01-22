@@ -16,6 +16,7 @@ bool IMRT::DoseMatConstruction(
     fd::DENSITY_d& density_d,
     fd::SPECTRUM_h& spectrum_h,
     fd::KERNEL_h& kernel_h,
+    MatCSREnsemble** matEns,
     cudaStream_t stream
 ) {
     cudaEvent_t start, stop, globalStart, globalStop;
@@ -54,7 +55,7 @@ bool IMRT::DoseMatConstruction(
     size_t numDensityVoxels = densityDim.x * densityDim.y * densityDim.z;
     size_t EstNonZeroElementsPerMat = getarg<size_t>("EstNonZeroElementsPerMat");
     size_t estBufferSize = EstNonZeroElementsPerMat * beam_bundles.size();
-    MatCSREnsemble matEns(numRowsPerMat, numDensityVoxels, estBufferSize);
+    *matEns = new MatCSREnsemble(numRowsPerMat, numDensityVoxels, estBufferSize);
 
     // allocate working buffers
     // for safty check
@@ -253,7 +254,7 @@ bool IMRT::DoseMatConstruction(
             memsetStream
         );
 
-        matEns.addMat(d_denseDoseMat, localNumBeamlets, numDensityVoxels);
+        (**matEns).addMat(d_denseDoseMat, localNumBeamlets, numDensityVoxels);
 
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
@@ -293,14 +294,6 @@ bool IMRT::DoseMatConstruction(
     checkCudaErrors(cudaEventDestroy(globalStart));
     checkCudaErrors(cudaEventDestroy(stop));
     checkCudaErrors(cudaEventDestroy(start));
-
-
-    #if true
-        // for debug purposes
-        fs::path resultFolder(getarg<std::string>("outputFolder"));
-        resultFolder /= std::string("doseMatFolder");
-        matEns.tofile(resultFolder.string());
-    #endif
 
     return 0;
 }

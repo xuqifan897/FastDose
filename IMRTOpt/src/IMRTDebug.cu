@@ -1,5 +1,6 @@
 #include <boost/filesystem.hpp>
 #include "IMRTDebug.cuh"
+#include "IMRTDoseMat.cuh"
 #include "IMRTArgs.h"
 
 namespace fs = boost::filesystem;
@@ -200,4 +201,124 @@ bool IMRT::doseCalcDebug(
     checkCudaErrors(cudaFree(d_beams));
 
     return 0;
+}
+
+
+bool IMRT::sparseValidation(const MatCSREnsemble* matEns) {
+    // do beam-wise dose calculation, the sum of dose constributions from all beamlets
+    // get the maximum number of rows (beamlets) of all beams
+    int maxNumBeamletsPerBatch = 0;
+    for (int i=0; i<matEns->numMatrices; i++)
+        maxNumBeamletsPerBatch = max(maxNumBeamletsPerBatch, (int)(matEns->numRowsPerMat[i]));
+
+    // allocate the column vector, representing the weights of all beamlets
+    float* d_beamletWeights = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_beamletWeights,
+        maxNumBeamletsPerBatch*sizeof(float)));
+    std::vector<float> h_beamletWeights(maxNumBeamletsPerBatch, 1.0f);
+    checkCudaErrors(cudaMemcpy(d_beamletWeights, h_beamletWeights.data(),
+        maxNumBeamletsPerBatch*sizeof(float), cudaMemcpyHostToDevice));
+    
+    // allocate the output vector
+    cusparseDnVecDescr_t vecOutput = nullptr;
+    float* d_vecOutput = nullptr;
+    size_t numColsPerMat = matEns->numColsPerMat;
+    checkCudaErrors(cudaMalloc((void**)&d_vecOutput, numColsPerMat*sizeof(float)));
+    checkCusparse(cusparseCreateDnVec(&vecOutput, numColsPerMat, d_vecOutput, CUDA_R_32F));
+    std::vector<float> h_vecOutput(numColsPerMat, 0.0f);
+
+    size_t bufferSize = 0;
+    void* dBuffer = nullptr;
+
+    fs::path resultFolder = fs::path(getarg<std::string>("outputFolder"));
+    resultFolder /= std::string("BeamDoseMat");
+    if (! fs::is_directory(resultFolder))
+        fs::create_directory(resultFolder);
+    
+    cusparseHandle_t handle = nullptr;
+    checkCusparse(cusparseCreate(&handle));
+    for (int i=0; i<matEns->numMatrices; i++) {
+        int numRows = matEns->numRowsPerMat[i];
+        int numNonZero = matEns->NonZeroElements[i];
+        size_t* d_csr_offsets = matEns->d_offsetsBuffer + matEns->OffsetBufferIdx[i];
+        size_t* d_csr_columns = matEns->d_columnsBuffer;
+        float* d_csr_values = matEns->d_valuesBuffer;
+        if (i > 0) {
+            d_csr_columns += matEns->CumuNonZeroElements[i-1];
+            d_csr_values += matEns->CumuNonZeroElements[i-1];
+        }
+
+        cusparseSpMatDescr_t matSparse;
+        checkCusparse(cusparseCreateCsr(
+            &matSparse, numRows, numColsPerMat, numNonZero,
+            d_csr_offsets, d_csr_columns, d_csr_values,
+            CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I,
+            CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+        
+        // construct input vector
+        cusparseDnVecDescr_t vecInput = nullptr;
+        checkCusparse(cusparseCreateDnVec(
+            &vecInput, numRows, d_beamletWeights, CUDA_R_32F));
+
+        // determine the size of an external buffer
+        size_t bufferSizeLocal = 0;
+        float alpha = 1;
+        float beta = 0;
+        checkCusparse(cusparseSpMV_bufferSize (
+            handle, CUSPARSE_OPERATION_TRANSPOSE,
+            &alpha, matSparse, vecInput, &beta, vecOutput, CUDA_R_32F,
+            CUSPARSE_SPMV_ALG_DEFAULT, &bufferSizeLocal));
+        
+        if (bufferSizeLocal > bufferSize) {
+            std::cout << "Enlarge buffer size, from " << bufferSize
+                << " to " << bufferSizeLocal << std::endl;
+            bufferSize = bufferSizeLocal;
+            if (dBuffer != nullptr) {
+                checkCudaErrors(cudaFree(dBuffer));
+            }
+            checkCudaErrors(cudaMalloc((void**)&dBuffer, bufferSize));
+        }
+
+        checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_TRANSPOSE,
+            &alpha, matSparse, vecInput, &beta, vecOutput, CUDA_R_32F,
+            CUSPARSE_SPMV_ALG_DEFAULT, dBuffer));
+        
+        checkCusparse(cusparseDestroyDnVec(vecInput));
+        checkCusparse(cusparseDestroySpMat(matSparse));
+
+        // log out
+        checkCudaErrors(cudaMemcpyAsync(h_vecOutput.data(), d_vecOutput,
+            numColsPerMat*sizeof(float), cudaMemcpyDeviceToHost));
+        fs::path file = resultFolder / (std::string("beam")
+            + std::to_string(i) + std::string(".bin"));
+        std::ofstream f_handle(file.string());
+        if (! f_handle.is_open()) {
+            std::cerr << "Cannot open file: " << file << std::endl;
+            return 1;
+        }
+        f_handle.write((char*)(h_vecOutput.data()), numColsPerMat*sizeof(float));
+        f_handle.close();
+        std::cout << file << std::endl;
+    }
+
+    if (bufferSize > 0)
+        checkCudaErrors(cudaFree(dBuffer));
+    checkCusparse(cusparseDestroyDnVec(vecOutput));
+    checkCudaErrors(cudaFree(d_vecOutput));
+    if (maxNumBeamletsPerBatch > 0)
+        checkCudaErrors(cudaFree(d_beamletWeights));
+    return 0;
+}
+
+
+bool IMRT::conversionValidation(
+    const MatCSR& mat, const MatCSREnsemble& matEns
+) {
+    const std::vector<size_t>& numRowsPerMat = matEns.numRowsPerMat;
+    size_t numRowsTotal = matEns.CumuNumRowsPerMat.back();
+    std::vector<float> h_beamletWeights(numRowsTotal, 0);
+    float* d_beamletWeights = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_beamletWeights, numRowsTotal*sizeof(float)));
+
+    // allocate buffer
 }

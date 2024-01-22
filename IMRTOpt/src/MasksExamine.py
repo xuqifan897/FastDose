@@ -553,6 +553,59 @@ def viewBEVDose():
         print("Beamlet {}".format(i))
 
 
+def BeamDoseView():
+    """
+    This function views the dose of each beam
+    """
+    doseFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/BeamDoseMat"
+    densityFile = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw"
+    densityShape = (149, 220, 220)
+    nBeams = 452
+    figuresFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/BeamDoseView"
+    
+    if not os.path.isdir(figuresFolder):
+        os.mkdir(figuresFolder)
+
+    densityArray = np.fromfile(densityFile, dtype=np.float32)
+    densityArray = np.reshape(densityArray, densityShape)
+
+    coronalIdx = 110
+    axialIdx = 90
+    sagitalIdx = 70
+
+    coronalSlice = densityArray[:, coronalIdx, :]
+    axialSlice = densityArray[axialIdx, :, :]
+    sagitalSlice = densityArray[:, :, sagitalIdx]
+
+    for i in range(nBeams):
+        file = os.path.join(doseFolder, 'beam{}.bin'.format(i))
+        doseArray = np.fromfile(file, dtype=np.float32)
+        doseArray = np.reshape(doseArray, densityShape)
+        doseCoronal = doseArray[:, coronalIdx, :]
+        doseAxial = doseArray[axialIdx, :, :]
+        doseSagital = doseArray[:, :, sagitalIdx]
+
+        plt.imshow(coronalSlice, cmap='gray')
+        plt.imshow(doseCoronal, alpha=0.5)
+        figureFile = os.path.join(figuresFolder, 'coronalBeam{}.png'.format(i))
+        plt.savefig(figureFile)
+        plt.clf()
+
+        plt.imshow(axialSlice, cmap='gray')
+        plt.imshow(doseAxial, alpha=0.5)
+        figureFile = os.path.join(figuresFolder, 'axialBeam{}.png'.format(i))
+        plt.savefig(figureFile)
+        plt.clf()
+
+        plt.imshow(sagitalSlice, cmap='gray')
+        plt.imshow(doseSagital, alpha=0.5)
+        figureFile = os.path.join(figuresFolder, 'sagitalBeam{}.png'.format(i))
+        plt.savefig(figureFile)
+        plt.clf()
+
+        print("Beam {} done!".format(i))
+
+
 if __name__ == '__main__':
     # examineMasks()
     # readMasks()
@@ -564,5 +617,6 @@ if __name__ == '__main__':
     # MaskH5Copy()
     # writeRingStruct()
     # viewPreSampling()
-    viewPVCSDose()
+    # viewPVCSDose()
     # viewBEVDose()
+    BeamDoseView()
