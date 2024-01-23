@@ -557,11 +557,11 @@ def BeamDoseView():
     """
     This function views the dose of each beam
     """
-    doseFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/BeamDoseMat"
+    doseFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/BeamDoseMatNew"
     densityFile = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw"
     densityShape = (149, 220, 220)
     nBeams = 452
-    figuresFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/BeamDoseView"
+    figuresFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/BeamDoseViewNew"
     
     if not os.path.isdir(figuresFolder):
         os.mkdir(figuresFolder)

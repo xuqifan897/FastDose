@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     doseMatFolder /= std::string("doseMatFolder");
     if (mode == 0) {
         matEns->tofile(doseMatFolder.string());
-        return ;
+        return;
     } else if (mode == 2) {
         const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
         size_t numColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
@@ -80,6 +80,20 @@ int main(int argc, char** argv) {
         IMRT::sparseValidation(matEns);
     #endif
 
-    IMRT::MatCSR matrix;
-    matrix.fuseEnsemble(*matEns);
+    IMRT::MatCSR *matrixT;
+    matrixT = new IMRT::MatCSR;
+    matrixT->fuseEnsemble(*matEns);
+    delete matEns;
+
+    #if false
+        IMRT::conversionValidation(matrix, *matEns);
+    #endif
+
+    // A, AT are the sub-blocks of matrix above, containing only the OAR voxels
+    IMRT::MatCSR *A, *AT;
+    A = new IMRT::MatCSR;
+    AT = new IMRT::MatCSR;
+
+    IMRT::MatOARSlicing(*matrixT, *A, *AT, structs);
+    delete matrixT;
 }

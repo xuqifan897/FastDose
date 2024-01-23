@@ -60,6 +60,8 @@ namespace IMRT {
         size_t* d_csr_columns;
         float* d_csr_values;
         void* d_buffer_spmv;
+        size_t numRows;
+        size_t numCols;
         int64_t nnz;
     };
 
@@ -121,6 +123,11 @@ namespace IMRT {
         MatCSREnsemble** matEns,
         cudaStream_t stream=0
     );
+
+
+    bool MatOARSlicing(
+        const MatCSR& fullMat, MatCSR& sliceMat, MatCSR& sliceMatT,
+        const std::vector<StructInfo>& structs);
 }
 
 #endif

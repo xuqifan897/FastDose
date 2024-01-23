@@ -314,11 +314,83 @@ bool IMRT::sparseValidation(const MatCSREnsemble* matEns) {
 bool IMRT::conversionValidation(
     const MatCSR& mat, const MatCSREnsemble& matEns
 ) {
+    // allocate input
     const std::vector<size_t>& numRowsPerMat = matEns.numRowsPerMat;
     size_t numRowsTotal = matEns.CumuNumRowsPerMat.back();
     std::vector<float> h_beamletWeights(numRowsTotal, 0);
     float* d_beamletWeights = nullptr;
     checkCudaErrors(cudaMalloc((void**)&d_beamletWeights, numRowsTotal*sizeof(float)));
+    cusparseDnVecDescr_t vec_beamletWeights = nullptr;
+    checkCusparse(cusparseCreateDnVec(&vec_beamletWeights, numRowsTotal,
+        d_beamletWeights, CUDA_R_32F));
 
-    // allocate buffer
+    // allocate result buffer
+    size_t numCols = matEns.numColsPerMat;
+    std::vector<float> h_result(numCols, 0);
+    float* d_result = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&d_result, numCols*sizeof(float)));
+    cusparseDnVecDescr_t vec_result = nullptr;
+    checkCusparse(cusparseCreateDnVec(
+        &vec_result, numCols, d_result, CUDA_R_32F));
+
+    // allocate additional buffer
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    size_t bufferSize = 0;
+    void* dBuffer = nullptr;
+    cusparseHandle_t handle = nullptr;
+    checkCusparse(cusparseCreate(&handle));
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_TRANSPOSE,
+        &alpha, mat.matA, vec_beamletWeights, &beta, vec_result, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
+    std::cout << "Buffer size: " << bufferSize << " [bytes]" << std::endl;
+    checkCudaErrors(cudaMalloc(&dBuffer, bufferSize));
+
+    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    resultFolder /= std::string("BeamDoseMatNew");
+    if (! fs::is_directory(resultFolder))
+        fs::create_directory(resultFolder);
+
+    for (int beamIdx=0; beamIdx<numRowsPerMat.size(); beamIdx++) {
+        // construct input vector, the fluence map of beamletIdx is one
+        size_t beamWeightIdx = 0;
+        for (int ii=0; ii<numRowsPerMat.size(); ii++) {
+            size_t currentRows = numRowsPerMat[ii];
+            float fluenceValue = 0.0f;
+            if (ii == beamIdx)
+                fluenceValue = 1.0f;
+            for (size_t jj=0; jj<currentRows; jj++) {
+                h_beamletWeights[beamWeightIdx] = fluenceValue;
+                beamWeightIdx++;
+            }
+        }
+        checkCudaErrors(cudaMemcpy(d_beamletWeights, h_beamletWeights.data(),
+            numRowsTotal*sizeof(float), cudaMemcpyHostToDevice));
+
+        checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_TRANSPOSE,
+            &alpha, mat.matA, vec_beamletWeights, &beta, vec_result, CUDA_R_32F,
+            CUSPARSE_SPMV_ALG_DEFAULT, dBuffer));
+        
+        checkCudaErrors(cudaMemcpy(
+            h_result.data(), d_result, numCols*sizeof(float), cudaMemcpyDeviceToHost));
+
+        fs::path file = resultFolder / (std::string("beam")
+            + std::to_string(beamIdx) + std::string(".bin"));
+        std::ofstream f(file.string());
+        if (! f.is_open()) {
+            std::cerr << "Cannot open file: " << file << std::endl;
+            return 1;
+        }
+        f.write((char*)h_result.data(), numCols*sizeof(float));
+        f.close();
+        std::cout << file << std::endl;
+    }
+
+    // clean-up
+    checkCudaErrors(cudaFree(dBuffer));
+    checkCusparse(cusparseDestroy(handle));
+    checkCudaErrors(cudaFree(d_result));
+    checkCudaErrors(cudaFree(d_beamletWeights));
+    return 0;
 }
