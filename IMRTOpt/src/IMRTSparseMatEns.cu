@@ -4,6 +4,7 @@
 namespace fs = boost::filesystem;
 
 #include "IMRTDoseMat.cuh"
+#include "IMRTDoseMatEns.cuh"
 
 
 IMRT::MatCSREnsemble::MatCSREnsemble(
@@ -330,7 +331,7 @@ bool IMRT::MatCSREnsemble::fromfile(const std::string& resultFolder) {
     cudaEventElapsedTime(&milliseconds, start, stop);
     checkCudaErrors(cudaEventDestroy(start));
     checkCudaErrors(cudaEventDestroy(stop));
-    std::cout << "sparse matrix initialiation completed. Time elapsed: "
+    std::cout << "Sparse matrix initialiation completed. Time elapsed: "
         << std::fixed << milliseconds * 0.001f << " [s]" << std::endl << std::endl;
     return 0;
 }

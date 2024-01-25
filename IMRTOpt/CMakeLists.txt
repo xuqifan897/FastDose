@@ -32,6 +32,10 @@ target_link_libraries(IMRT PRIVATE
     -lz
 )
 
+find_package(Eigen3 REQUIRED NO_MODULE)
+target_link_libraries(IMRT PRIVATE Eigen3::Eigen)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --diag-suppress 20012")
+
 add_executable(MaskGen MaskGen.cu)
 target_include_directories(MaskGen PRIVATE ${Boost_INCLUDE_DIRS})
 target_link_libraries(MaskGen PRIVATE Boost::program_options Boost::filesystem)

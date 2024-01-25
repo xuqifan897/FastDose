@@ -3,6 +3,7 @@
 #include <vector>
 #include "IMRTBeamBundle.cuh"
 #include "IMRTDoseMat.cuh"
+#include "IMRTDoseMatEns.cuh"
 #include "fastdose.cuh"
 
 namespace IMRT {
@@ -17,7 +18,11 @@ namespace IMRT {
     bool sparseValidation(const MatCSREnsemble* matEns);
 
     // to test if the sparse matrix is correct
-    bool conversionValidation(const MatCSR& mat, const MatCSREnsemble& matEns);
+    class MatCSR_Eigen;
+    class MatCSR64;
+    bool conversionValidation(const MatCSR64& mat, const MatCSREnsemble& matEns);
+    bool test_MatCSR_host();
+    bool test_MatCSR_load(const MatCSR_Eigen& input, const std::string& doseMatFolder);
 }
 
 #endif

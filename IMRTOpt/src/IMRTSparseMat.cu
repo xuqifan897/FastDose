@@ -1,7 +1,7 @@
 #include "IMRTDoseMat.cuh"
 
 
-bool IMRT::MatCSR::dense2sparse(
+bool IMRT::MatCSR64::dense2sparse(
     float* d_dense, size_t num_rows, size_t num_cols, size_t ld
 ) {
     checkCudaErrors(cudaMalloc((void**)(&this->d_csr_offsets),
@@ -59,7 +59,7 @@ bool IMRT::MatCSR::dense2sparse(
 }
 
 
-bool IMRT::MatCSR::fuseEnsemble(MatCSREnsemble& matEns) {
+bool IMRT::MatCSR64::fuseEnsemble(MatCSREnsemble& matEns) {
     // directly move d_columnsBuffer and d_valuesBuffer from matEns
     this->d_csr_columns = matEns.d_columnsBuffer;
     matEns.d_columnsBuffer = nullptr;
@@ -113,7 +113,7 @@ bool IMRT::MatCSR::fuseEnsemble(MatCSREnsemble& matEns) {
 
 
 bool IMRT::MatOARSlicing(
-    const MatCSR& fullMat, MatCSR& sliceMat, MatCSR& sliceMatT,
+    const MatCSR64& fullMat, MatCSR64& sliceMat, MatCSR64& sliceMatT,
     const std::vector<StructInfo>& structs
 ) {
     if (sliceMat.d_csr_offsets != nullptr

@@ -6,6 +6,8 @@
 #include "cusparse.h"
 
 #include "IMRTBeamBundle.cuh"
+#include "IMRTDoseMatEns.cuh"
+#include "IMRTDoseMatEigen.cuh"
 
 #define TIMING true
 #define pitchModule 64
@@ -23,13 +25,13 @@
 namespace IMRT {
     class MatCSREnsemble;
 
-    class MatCSR {
+    class MatCSR64 {
     public:
-        MatCSR() : matA(nullptr), d_csr_offsets(nullptr),
+        MatCSR64() : matA(nullptr), d_csr_offsets(nullptr),
             d_csr_columns(nullptr), d_csr_values(nullptr),
             d_buffer_spmv(nullptr), nnz(0) {}
 
-        ~MatCSR() {
+        ~MatCSR64() {
             if (this->matA != nullptr) {
                 checkCusparse(cusparseDestroySpMat(matA));
                 this->matA = nullptr;
@@ -65,56 +67,6 @@ namespace IMRT {
         int64_t nnz;
     };
 
-
-    class MatCSREnsemble {
-    public:
-        MatCSREnsemble(
-            const std::vector<size_t> numRowsPerMat_,
-            size_t numColsPerMat_,
-            size_t estBufferSize  // estimated buffer size, in elements, not b
-        );
-
-        MatCSREnsemble(size_t numColsPerMat_):
-            numColsPerMat(numColsPerMat_),
-            d_offsetsBuffer(nullptr),
-            d_columnsBuffer(nullptr),
-            d_valuesBuffer(nullptr),
-            d_constructBuffer(nullptr)
-        {}
-
-        ~MatCSREnsemble();
-
-        bool addMat(float* d_dense, size_t numRows, size_t numCols);
-        bool tofile(const std::string& resultFolder);
-        bool fromfile(const std::string& resultFolder);
-        friend bool sparseValidation(const MatCSREnsemble* matEns);
-        friend bool conversionValidation(
-            const MatCSR& mat, const MatCSREnsemble& matEns);
-        friend MatCSR;
-
-    private:
-        std::vector<cusparseSpMatDescr_t> matA_array;
-        std::vector<size_t> NonZeroElements;
-        std::vector<size_t> CumuNonZeroElements;
-
-        std::vector<size_t> numRowsPerMat;
-        std::vector<size_t> CumuNumRowsPerMat;
-        // the starting index of d_offsetsBuffer of each matrix
-        std::vector<size_t> OffsetBufferIdx;
-
-        size_t numMatrices;
-        size_t numColsPerMat;
-        size_t* d_offsetsBuffer;
-
-        size_t bufferSize;  // in number of elements, not bytes
-        size_t* d_columnsBuffer;
-        float* d_valuesBuffer;
-
-        size_t constructBufferSize;  // in bytes
-        float* d_constructBuffer;
-    };
-
-
     bool DoseMatConstruction(
         std::vector<BeamBundle>& beam_bundles,
         fastdose::DENSITY_d& density_d,
@@ -126,7 +78,7 @@ namespace IMRT {
 
 
     bool MatOARSlicing(
-        const MatCSR& fullMat, MatCSR& sliceMat, MatCSR& sliceMatT,
+        const MatCSR64& fullMat, MatCSR64& sliceMat, MatCSR64& sliceMatT,
         const std::vector<StructInfo>& structs);
 }
 

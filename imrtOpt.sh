@@ -5,7 +5,7 @@ if [ ! -d ${outputFolder} ]; then
 fi;
 
 if true; then
-    ./build/bin/IMRT \
+    OMP_NUM_THREADS=128 ./build/bin/IMRT \
         --phantomDim 220 220 149 \
         --voxelSize 0.25 0.25 0.25 \
         --SAD 100 \

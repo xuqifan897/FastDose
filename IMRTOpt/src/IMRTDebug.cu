@@ -1,7 +1,10 @@
 #include <boost/filesystem.hpp>
+#include <Eigen/Dense>
+#include <omp.h>
 #include "IMRTDebug.cuh"
 #include "IMRTDoseMat.cuh"
 #include "IMRTArgs.h"
+#include "IMRTDoseMatEigen.cuh"
 
 namespace fs = boost::filesystem;
 namespace fd = fastdose;
@@ -312,7 +315,7 @@ bool IMRT::sparseValidation(const MatCSREnsemble* matEns) {
 
 
 bool IMRT::conversionValidation(
-    const MatCSR& mat, const MatCSREnsemble& matEns
+    const MatCSR64& mat, const MatCSREnsemble& matEns
 ) {
     // allocate input
     const std::vector<size_t>& numRowsPerMat = matEns.numRowsPerMat;
@@ -392,5 +395,147 @@ bool IMRT::conversionValidation(
     checkCusparse(cusparseDestroy(handle));
     checkCudaErrors(cudaFree(d_result));
     checkCudaErrors(cudaFree(d_beamletWeights));
+    return 0;
+}
+
+
+bool IMRT::test_MatCSR_host() {
+    // test a sparse matrix
+    float matDense[] = {0, 0, 1, 0, 2, 0,
+                        2, 0, 0, 1, 0, 0,
+                        0, 0, 1, 2, 0, 1,
+                        1, 0, 1, 0, 0, 0,
+                        1, 1, 0, 0, 0, 1};
+
+    EigenIdxType nRows = 5;
+    EigenIdxType nCols = 6;
+    EigenIdxType nnz = 0;
+    for (int i=0; i<nRows; i++) {
+        for (int j=0; j<nCols; j++) {
+            EigenIdxType idx = i * nCols + j;
+            nnz += (matDense[idx] > eps_fastdose);
+        }
+    }
+
+    EigenIdxType** offsets = new EigenIdxType*;
+    EigenIdxType** columns = new EigenIdxType*;
+    float** values = new float*;
+
+    *offsets = (EigenIdxType*)malloc(((nCols+1)*sizeof(EigenIdxType)));
+    *columns = (EigenIdxType*)malloc(nnz*sizeof(EigenIdxType));
+    *values = (float*)malloc(nnz*sizeof(float));
+
+    EigenIdxType cumu_nnz = 0;
+    (*offsets)[0] = cumu_nnz;
+    for (int i=0; i<nRows; i++) {
+        for (int j=0; j<nCols; j++) {
+            EigenIdxType idx = i * nCols + j;
+            if (matDense[idx] > eps_fastdose) {
+                (*columns)[cumu_nnz] = j;
+                (*values)[cumu_nnz] = matDense[idx];
+                cumu_nnz ++;
+            }
+        }
+        (*offsets)[i+1] = cumu_nnz;
+    }
+
+    #if false
+        std::cout << "Offsets: ";
+        for (int i=0; i<nRows+1; i++)
+            std::cout << (*offsets)[i] << " ";
+        std::cout << std::endl;
+
+        std::cout << "Columns: ";
+        for (int i=0; i<nnz; i++) {
+            std::cout << (*columns)[i] << " ";
+        }
+        std::cout << std::endl;
+
+        std::cout << "Values: ";
+        for (int i=0; i<nnz; i++) {
+            std::cout << (*values)[i] << " ";
+        }
+        std::cout << std::endl;
+    #endif
+
+    IMRT::MatCSR_Eigen mat;
+    mat.customInit(nRows, nCols, nnz,
+        *offsets, *columns, *values);
+    free(offsets);
+    free(columns);
+    free(values);
+
+    // then, print out the sparse matrix
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> denseMat = mat.toDense();
+    std::cout << "The constructed matrix:\n" << denseMat << std::endl;
+
+    return 0;
+}
+
+
+bool IMRT::test_MatCSR_load(const MatCSR_Eigen& input, const std::string& doseMatFolder) {
+    fs::path numRowsPerMatFile = fs::path(doseMatFolder) / fs::path("numRowsPerMat.bin");
+    std::ifstream f(numRowsPerMatFile.string());
+    if (! f.is_open()) {
+        std::cerr << "Cannot open file: " << numRowsPerMatFile << std::endl;
+        return 1;
+    }
+    f.seekg(0, std::ios::end);
+    size_t numMatrices = f.tellg() / sizeof(size_t);
+    f.seekg(0, std::ios::beg);
+    std::vector<size_t> numRowsPerMat(numMatrices, 0);
+    f.read((char*)numRowsPerMat.data(), numMatrices*sizeof(size_t));
+    f.close();
+
+    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    resultFolder /= std::string("BeamDoseMatEigen");
+    if (! fs::is_directory(resultFolder))
+        fs::create_directory(resultFolder);
+    
+    // calculate the number of rows
+    size_t totalNumRows = 0;
+    for (size_t i=0; i<numMatrices; i++)
+        totalNumRows += numRowsPerMat[i];
+    
+    // do calculation
+    size_t nThreads = 128;
+    Eigen::setNbThreads(nThreads);
+    std::cout << Eigen::nbThreads() << " threads are used in Eigen." << std::endl;
+    size_t offset = 0;
+    for (size_t i=0; i<numMatrices; i++) {
+        // construct the sparse vector
+        size_t local_nnz = numRowsPerMat[i];
+        EigenIdxType* local_offsets = (EigenIdxType*)malloc(2*sizeof(EigenIdxType));
+        local_offsets[0] = 0;
+        local_offsets[1] = local_nnz;
+        EigenIdxType* local_columns = (EigenIdxType*)malloc(local_nnz*sizeof(EigenIdxType));
+        float* local_values = (float*)malloc(local_nnz*sizeof(float));
+        for (size_t j=0; j<local_nnz; j++) {
+            local_columns[j] = offset;
+            offset ++;
+            local_values[j] = 1.0f;
+        }
+
+        MatCSR_Eigen beamletWeights;
+        beamletWeights.customInit(1, totalNumRows, local_nnz,
+            local_offsets, local_columns, local_values);
+        
+        MatCSR_Eigen result = beamletWeights * input;
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> result_dense = result.toDense();
+        // std::cout << "Dense matrix rows: " << result_dense.rows() << ", columns: " << result_dense.cols() << std::endl;
+        size_t size = result_dense.rows() * result_dense.cols();
+
+        // save result
+        fs::path file = resultFolder / (std::string("beam")
+            + std::to_string(i) + std::string(".bin"));
+        std::ofstream ofs(file.string());
+        if (! ofs.is_open()) {
+            std::cerr << "Cannot open file: " << file << std::endl;
+            return 1;
+        }
+        ofs.write((char*)result_dense.data(), size*sizeof(float));
+        ofs.close();
+        std::cout << file << std::endl;
+    }
     return 0;
 }
