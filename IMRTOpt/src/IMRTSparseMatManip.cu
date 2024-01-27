@@ -319,20 +319,16 @@ bool IMRT::OARFiltering(std::vector<MatCSR32>& OARMatricesT,
     const MatCSR32& matFilter, const MatCSR32& matFilterT,
     int** d_bufferOffsets, int** d_bufferColumns, float** d_bufferValues
 ) {
-    // preparation
-    #if true
-        int numMatrices = matricesT.size();
-        if (numMatrices != OARMatricesT.size()) {
-            std::cerr << "The size of the two vectors, matricesT and "
-                "OARMatricesT, are not the same." << std::endl;
-            return 1;
-        }
-    #else
-        int numMatrices = 1;
-    #endif
-    std::vector<cudaStream_t> streams(numMatrices);
-    std::vector<cusparseHandle_t> handles(numMatrices);
-    std::vector<cusparseSpGEMMDescr_t> SpGEMMDescs(numMatrices);
+    int numMatrices = matricesT.size();
+    if (numMatrices != OARMatricesT.size()) {
+        std::cerr << "The size of the two vectors, matricesT and "
+            "OARMatricesT, are not the same." << std::endl;
+        return 1;
+    }
+    cusparseHandle_t handle;
+    cusparseSpGEMMDescr_t SpGEMMDesc;
+    checkCusparse(cusparseCreate(&handle));
+    checkCusparse(cusparseSpGEMM_createDescr(&SpGEMMDesc));
 
     // first, we know the number of rows of the result.
     // So we can pre allocate d_bufferOffsets
@@ -344,6 +340,17 @@ bool IMRT::OARFiltering(std::vector<MatCSR32>& OARMatricesT,
     }
     checkCudaErrors(cudaMalloc((void**)d_bufferOffsets, offsetIdxPrev*sizeof(int)));
 
+    // pre-allocate buffer
+    size_t nnz_prev = 0;
+    for (int i=0; i<numMatrices; i++)
+        nnz_prev += matricesT[i].nnz;
+    int nnz_current = static_cast<int>(nnz_prev * 0.5f);
+    std::cout << "The number of non-zero elements in the full matrix is: "
+        << nnz_prev << ", we pre-allocate a buffer of size: " << nnz_current
+        << " elements." << std::endl;
+    checkCudaErrors(cudaMalloc((void**)d_bufferColumns, nnz_current*sizeof(int)));
+    checkCudaErrors(cudaMalloc((void**)d_bufferValues, nnz_current*sizeof(float)));
+
     for (int i=0; i<numMatrices; i++) {
         MatCSR32& destMat = OARMatricesT[i];
         destMat.d_csr_offsets = *d_bufferOffsets + offsetIdx[i];
@@ -352,11 +359,6 @@ bool IMRT::OARFiltering(std::vector<MatCSR32>& OARMatricesT,
             destMat.d_csr_offsets, nullptr, nullptr,
             CUSPARSE_INDEX_32I,  CUSPARSE_INDEX_32I,
             CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
-
-        checkCusparse(cusparseSpGEMM_createDescr(&SpGEMMDescs[i]));
-        checkCudaErrors(cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking));
-        checkCusparse(cusparseCreate(&handles[i]));
-        checkCusparse(cusparseSetStream(handles[i], streams[i]));
     }
 
     // ask bufferSize1 bytes for external memory
@@ -364,93 +366,80 @@ bool IMRT::OARFiltering(std::vector<MatCSR32>& OARMatricesT,
     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
     float alpha = 1.0f;
     float beta = 0.0f;
+    size_t bufferSize1 = 0;
+    size_t bufferSize2 = 0;
+    void* buffer1 = nullptr;
+    void* buffer2 = nullptr;
 
-        std::vector<size_t> bufferSize1(numMatrices, 0);
-        void* buffer1 = nullptr;
-        for (int i=0; i<numMatrices; i++) {
-            checkCusparse(cusparseSpGEMM_workEstimation(handles[i], opA, opB,
-                &alpha, matricesT[i].matA, matFilter.matA, &beta, OARMatricesT[i].matA,
-                CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT, SpGEMMDescs[i], &bufferSize1[i], nullptr));
-        }
-        cudaDeviceSynchronize();
-        size_t bufferSize1_total = 0;
-        for (int i=0; i<numMatrices; i++)
-            bufferSize1_total += bufferSize1[i];
-        std::cout << "bufferSize1_total: " << bufferSize1_total << std::endl;
-        checkCudaErrors(cudaMalloc(&buffer1, bufferSize1_total));
+    int cumuNnz = 0;
+    for (int i=0; i<numMatrices; i++) {
+        MatCSR32& dstMat = OARMatricesT[i];
+        const MatCSR32& srcMat = matricesT[i];
 
-        size_t cumuBufferOffset1 = 0;
-        for (int i=0; i<numMatrices; i++) {
-            void* localBuffer1 = static_cast<char*>(buffer1) + cumuBufferOffset1;
-            cumuBufferOffset1 += bufferSize1[i];
-            checkCusparse(cusparseSpGEMM_workEstimation(handles[i], opA, opB,
-                &alpha, matricesT[i].matA, matFilter.matA, &beta, OARMatricesT[i].matA,
-                CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT, SpGEMMDescs[i], &bufferSize1[i], localBuffer1));
-        }
-
-        // ask bufferSize2 bytes for external memory
-        std::vector<size_t> bufferSize2(numMatrices, 0);
-        void* buffer2 = nullptr;
-        for (int i=0; i<numMatrices; i++) {
-            checkCusparse(cusparseSpGEMM_compute(handles[i], opA, opB,
-                &alpha, matricesT[i].matA, matFilter.matA, &beta, OARMatricesT[i].matA,
-                CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT,
-                SpGEMMDescs[i], &bufferSize2[i], nullptr));
-        }
-        cudaDeviceSynchronize();
-        size_t bufferSize2_total = 0;
-        for (int i=0; i<numMatrices; i++)
-            bufferSize2_total += bufferSize2[i];
-        std::cout << "bufferSize2_total: " << bufferSize2_total << std::endl;
-        checkCudaErrors(cudaMalloc(&buffer2, bufferSize2_total));
-
-        // compute the intermediate product of A * B
-        size_t cumuBufferOffset2 = 0;
-        for (int i=0; i<numMatrices; i++) {
-            void* localBuffer2 = static_cast<char*>(buffer2) + cumuBufferOffset2;
-            cumuBufferOffset2 += bufferSize2[i];
-            checkCusparse(cusparseSpGEMM_compute(handles[i], opA, opB,
-                &alpha, matricesT[i].matA, matFilter.matA, &beta, OARMatricesT[i].matA,
-                CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT,
-                SpGEMMDescs[i], &bufferSize2[i], localBuffer2));
-        }
-
-        // get matrix C non-zero entries
-        size_t totalNnz = 0;
-        int64_t C_num_rows1, C_num_cols1;
-        for (int i=0; i<numMatrices; i++) {
-            checkCusparse(cusparseSpMatGetSize(OARMatricesT[i].matA,
-                &C_num_rows1, &C_num_cols1, &OARMatricesT[i].nnz));
-            totalNnz += OARMatricesT[i].nnz;
-        }
-        checkCudaErrors(cudaMalloc((void**)d_bufferColumns, totalNnz*sizeof(int)));
-        checkCudaErrors(cudaMalloc((void**)d_bufferValues, totalNnz*sizeof(float)));
-
-        size_t cumuNnzOffset = 0;
-        for (int i=0; i<numMatrices; i++) {
-            // update matC with the new pointers
-            int* localBufferColumns = *d_bufferColumns + cumuNnzOffset;
-            float* localBufferValues = *d_bufferValues + cumuNnzOffset;
-            cumuNnzOffset += OARMatricesT[i].nnz;
-            checkCusparse(cusparseCsrSetPointers(OARMatricesT[i].matA,
-                OARMatricesT[i].d_csr_offsets, localBufferColumns, localBufferValues));
+        size_t bufferSize1Local = 0;
+        checkCusparse(cusparseSpGEMM_workEstimation(
+            handle, opA, opB,
+            &alpha, srcMat.matA, matFilter.matA, &beta, dstMat.matA,
+            CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT,
+            SpGEMMDesc, &bufferSize1Local, nullptr));
         
-            // copy the final products to the matirxC
-            checkCusparse(cusparseSpGEMM_copy(handles[i], opA, opB,
-                &alpha, matricesT[i].matA, matFilter.matA, &beta, OARMatricesT[i].matA,
-                CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT, SpGEMMDescs[i]));
+        if (bufferSize1Local > bufferSize1) {
+            bufferSize1 = 2 * bufferSize1Local;
+            if (buffer1 != nullptr)
+                checkCudaErrors(cudaFree(buffer1));
+            checkCudaErrors(cudaMalloc(&buffer1, bufferSize1));
+            std::cout << "Buffer 1 resized: " << bufferSize1 << std::endl;
         }
 
-        std::cout << "Total number of non-zero elements in OARMatrices vector: "
-            << cumuNnzOffset << std::endl;
+        checkCusparse(cusparseSpGEMM_workEstimation(
+            handle, opA, opB,
+            &alpha, srcMat.matA, matFilter.matA, &beta, dstMat.matA,
+            CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT,
+            SpGEMMDesc, &bufferSize1Local, buffer1));
 
-    // clean up
+        size_t bufferSize2Local = 0;
+        checkCusparse(cusparseSpGEMM_compute(
+            handle, opA, opB,
+            &alpha, srcMat.matA, matFilter.matA, &beta, dstMat.matA,
+            CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT,
+            SpGEMMDesc, &bufferSize2Local, nullptr));
+
+        if (bufferSize2Local > bufferSize2) {
+            bufferSize2 = 2 * bufferSize2Local;
+            if (buffer2 != nullptr)
+                checkCudaErrors(cudaFree(buffer2));
+            checkCudaErrors(cudaMalloc(&buffer2, bufferSize2));
+            std::cout << "Buffer 2 resized: " << bufferSize2 << std::endl;
+        }
+
+        checkCusparse(cusparseSpGEMM_compute(
+            handle, opA, opB,
+            &alpha, srcMat.matA, matFilter.matA, &beta, dstMat.matA,
+            CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT,
+            SpGEMMDesc, &bufferSize2Local, buffer2
+        ));
+
+        int64_t C_num_rows1, C_num_cols1;
+        checkCusparse(cusparseSpMatGetSize(dstMat.matA,
+            &C_num_rows1, &C_num_cols1, &dstMat.nnz));
+        checkCusparse(cusparseCsrSetPointers(dstMat.matA, dstMat.d_csr_offsets,
+            *d_bufferColumns + cumuNnz, *d_bufferValues + cumuNnz));
+        cumuNnz += dstMat.nnz;
+
+        if (cumuNnz > nnz_current) {
+            std::cerr << "The number of non-zero elements " << cumuNnz
+                << " has exceeded the pre-allocated buffer " << nnz_current << std::endl;
+            return 1;
+        }
+
+        checkCusparse(cusparseSpGEMM_copy(handle, opA, opB,
+            &alpha, srcMat.matA, matFilter.matA, &beta, dstMat.matA,
+            CUDA_R_32F, CUSPARSE_SPGEMM_DEFAULT, SpGEMMDesc));
+
+        std::cout << "Matrix " << i << " / " << numMatrices << " finished." << std::endl;
+    }
     checkCudaErrors(cudaFree(buffer2));
     checkCudaErrors(cudaFree(buffer1));
-    for (int i=0; i<numMatrices; i++) {
-        checkCusparse(cusparseDestroy(handles[i]));
-        checkCudaErrors(cudaStreamDestroy(streams[i]));
-        checkCusparse(cusparseSpGEMM_destroyDescr(SpGEMMDescs[i]));
-    }
+
     return 0;
 }
