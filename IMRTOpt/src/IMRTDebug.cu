@@ -539,3 +539,83 @@ bool IMRT::test_MatCSR_load(const MatCSR_Eigen& input, const std::string& doseMa
     }
     return 0;
 }
+
+
+bool IMRT::test_MatFilter(const MatCSR32& matFilter, const MatCSR32& matFilterT) {
+    // firstly, test the correctness of matFilterT
+    int numRows = matFilterT.numRows;
+    int numCols = matFilterT.numCols;
+    cusparseDnVecDescr_t vecX, vecY;
+    float* X = nullptr, *Y = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&X, numCols*sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&Y, numRows*sizeof(float)));
+    std::vector<float> h_X(numCols, 1.0f);
+    checkCudaErrors(cudaMemcpy(X, h_X.data(),
+        numCols*sizeof(float), cudaMemcpyHostToDevice));
+    checkCusparse(cusparseCreateDnVec(&vecX, numCols, X, CUDA_R_32F));
+    checkCusparse(cusparseCreateDnVec(&vecY, numRows, Y, CUDA_R_32F));
+
+    cusparseHandle_t handle = nullptr;
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    checkCusparse(cusparseCreate(&handle));
+    // allocate an external buffer if needed
+    size_t bufferSizeT = 0;
+    void* dBuffer = nullptr;
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, matFilterT.matA, vecX, &beta, vecY, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, &bufferSizeT));
+    checkCudaErrors(cudaMalloc(&dBuffer, bufferSizeT));
+    checkCusparse(cusparseSpMV(
+        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, matFilterT.matA, vecX, &beta, vecY, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, dBuffer));
+
+    // check results
+    std::vector<float> h_Y(numRows, 0.0f);
+    std::vector<float> h_Y_reference(numRows, 1.0f);
+    checkCudaErrors(cudaMemcpy(h_Y.data(), Y, numRows*sizeof(float), cudaMemcpyDeviceToHost));
+    for (int i=0; i<numRows; i++) {
+        if (abs(h_Y[i] - h_Y_reference[i]) > eps_fastdose) {
+            std::cerr << "The result of matFilterT is not as expected." << std::endl;
+            return 1;
+        }
+    }
+
+
+    // secondly, test the correctness of matFilterT
+    size_t bufferSize = 0;
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_TRANSPOSE,
+        &alpha, matFilter.matA, vecX, &beta, vecY, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
+    if (bufferSize > bufferSizeT) {
+        checkCudaErrors(cudaFree(dBuffer));
+        checkCudaErrors(cudaMalloc((void**)&dBuffer, bufferSize));
+    }
+    checkCusparse(cusparseSpMV(
+        handle, CUSPARSE_OPERATION_TRANSPOSE,
+        &alpha, matFilter.matA, vecX, &beta, vecY, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, dBuffer));
+
+    // checkResults
+    checkCudaErrors(cudaMemcpy(h_Y.data(), Y, numRows*sizeof(float), cudaMemcpyDeviceToHost));
+    for (int i=0; i<numRows; i++) {
+        if (abs(h_Y[i] - h_Y_reference[i]) > eps_fastdose) {
+            std::cerr << "The result of matFilter is not as expected." << std::endl;
+            return 1;
+        }
+    }
+
+    std::cout << "OAR filtering matrix test passed!" << std::endl;
+
+    // clean up
+    checkCudaErrors(cudaFree(dBuffer));
+    checkCusparse(cusparseDestroy(handle))
+    checkCusparse(cusparseDestroyDnVec(vecX));
+    checkCusparse(cusparseDestroyDnVec(vecY))
+    checkCudaErrors(cudaFree(X));
+    checkCudaErrors(cudaFree(Y));
+    return 0;
+}

@@ -10,6 +10,7 @@
 #include "IMRTDoseMatEigen.cuh"
 
 #define TIMING true
+#define BeamsPerBatch 100
 #define pitchModule 64
 
 #define checkCusparse(func)                                                   \
@@ -80,6 +81,56 @@ namespace IMRT {
     bool MatOARSlicing(
         const MatCSR64& fullMat, MatCSR64& sliceMat, MatCSR64& sliceMatT,
         const std::vector<StructInfo>& structs);
+
+    
+    class MatCSR32 {
+    public:
+        MatCSR32() : matA(nullptr), d_csr_offsets(nullptr),
+            d_csr_columns(nullptr), d_csr_values(nullptr),
+            d_buffer_spmv(nullptr), nnz(0) {}
+
+        ~MatCSR32() {
+            if (this->matA != nullptr) {
+                checkCusparse(cusparseDestroySpMat(matA));
+                this->matA = nullptr;
+            }
+            if (this->d_csr_offsets != nullptr) {
+                checkCudaErrors(cudaFree(this->d_csr_offsets));
+                this->d_csr_offsets = nullptr;
+            }
+            if (this->d_csr_columns != nullptr) {
+                checkCudaErrors(cudaFree(this->d_csr_columns));
+                this->d_csr_columns = nullptr;
+            }
+            if (this->d_csr_values != nullptr) {
+                checkCudaErrors(cudaFree(this->d_csr_values));
+                this->d_csr_values = nullptr;
+            }
+            if (this->d_buffer_spmv != nullptr) {
+                checkCudaErrors(cudaFree(this->d_buffer_spmv));
+                this->d_buffer_spmv = nullptr;
+            }
+        }
+
+        bool fuseEnsemble(MatCSREnsemble& matEns);
+
+        cusparseSpMatDescr_t matA;
+        int* d_csr_offsets;
+        int* d_csr_columns;
+        float* d_csr_values;
+        void* d_buffer_spmv;
+        int numRows;
+        int numCols;
+        int64_t nnz;
+    };
+
+    bool MatCSR32_fromfile(const std::string resultFolder,
+        size_t numColsPerMat, const std::vector<StructInfo>& structs);
+    bool getOARFilter(MatCSR32& matFilter, MatCSR32& matFilterT,
+        const std::vector<StructInfo>& structs, size_t nVoxels);
+    bool OARFiltering(std::vector<MatCSR32>& OARMatricesT, const std::vector<MatCSR32>& matricesT,
+        const MatCSR32& matFilter, const MatCSR32& matFilterT,
+        int** d_bufferOffsets, int** d_bufferColumns, float** d_bufferValues);
 }
 
 #endif

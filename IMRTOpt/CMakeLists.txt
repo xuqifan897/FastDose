@@ -36,6 +36,10 @@ find_package(Eigen3 REQUIRED NO_MODULE)
 target_link_libraries(IMRT PRIVATE Eigen3::Eigen)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --diag-suppress 20012")
 
+find_package(OpenMP REQUIRED)
+target_link_libraries(IMRT PRIVATE OpenMP::OpenMP_CXX)
+target_compile_options(IMRT PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${OpenMP_CXX_FLAGS}>)
+
 add_executable(MaskGen MaskGen.cu)
 target_include_directories(MaskGen PRIVATE ${Boost_INCLUDE_DIRS})
 target_link_libraries(MaskGen PRIVATE Boost::program_options Boost::filesystem)

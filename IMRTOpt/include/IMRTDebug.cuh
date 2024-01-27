@@ -20,9 +20,11 @@ namespace IMRT {
     // to test if the sparse matrix is correct
     class MatCSR_Eigen;
     class MatCSR64;
+    class MatCSR32;
     bool conversionValidation(const MatCSR64& mat, const MatCSREnsemble& matEns);
     bool test_MatCSR_host();
     bool test_MatCSR_load(const MatCSR_Eigen& input, const std::string& doseMatFolder);
+    bool test_MatFilter(const MatCSR32& matFilter, const MatCSR32& matFilterT);
 }
 
 #endif
