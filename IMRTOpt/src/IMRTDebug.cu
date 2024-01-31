@@ -619,3 +619,151 @@ bool IMRT::test_MatFilter(const MatCSR32& matFilter, const MatCSR32& matFilterT)
     checkCudaErrors(cudaFree(Y));
     return 0;
 }
+
+
+bool IMRT::test_SpMatOAR(const MatCSR64& SpOARmat, const MatCSR64& SpOARmatT,
+    const MatCSR_Eigen& filter, const std::vector<MatCSR_Eigen>& OARMatrices) {
+    // calculate the total number of beamlets
+    size_t totalNumBeamlets = 0;
+    for (size_t i=0; i<OARMatrices.size(); i++)
+        totalNumBeamlets += OARMatrices[i].getCols();
+    if (totalNumBeamlets != SpOARmat.numCols) {
+        std::cerr << "The number of columns is inconsistent with other "
+            "parts of the program." << std::endl;
+    }
+
+
+    // construct SpFilter
+    MatCSR64 SpFilter;
+    checkCudaErrors(cudaMalloc((void**)&SpFilter.d_csr_offsets, (filter.getRows()+1)*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&SpFilter.d_csr_columns, filter.getNnz()*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&SpFilter.d_csr_values, filter.getNnz()*sizeof(float)));
+    checkCudaErrors(cudaMemcpy(SpFilter.d_csr_offsets, filter.getOffset(),
+        (filter.getRows()+1)*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(SpFilter.d_csr_columns, filter.getIndices(),
+        filter.getNnz()*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(SpFilter.d_csr_values, filter.getValues(),
+        filter.getNnz()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCusparse(cusparseCreateCsr(
+        &SpFilter.matA, filter.getRows(), filter.getCols(), filter.getNnz(),
+        SpFilter.d_csr_offsets, SpFilter.d_csr_columns, SpFilter.d_csr_values,
+        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+    SpFilter.numRows = filter.getRows();
+    SpFilter.numCols = filter.getCols();
+    SpFilter.nnz = filter.getNnz();
+
+    // construct weight matrix
+    float* d_weight_data = nullptr;
+    std::vector<float> h_weight_data(totalNumBeamlets, 1.0f);
+    checkCudaErrors(cudaMalloc((void**)&d_weight_data, totalNumBeamlets*sizeof(float)));
+    checkCudaErrors(cudaMemcpy(d_weight_data, h_weight_data.data(),
+        totalNumBeamlets*sizeof(float), cudaMemcpyHostToDevice));
+    cusparseDnVecDescr_t d_weight_vec;
+    checkCusparse(cusparseCreateDnVec(&d_weight_vec, totalNumBeamlets, d_weight_data, CUDA_R_32F));
+
+    float* d_result_data = nullptr;
+    size_t nVoxels = SpOARmat.numRows;
+    std::vector<float> h_result_data(nVoxels, 1.0f);
+    checkCudaErrors(cudaMalloc((void**)&d_result_data, nVoxels*sizeof(float)));
+    checkCudaErrors(cudaMemcpy(d_result_data, h_result_data.data(),
+        nVoxels*sizeof(float), cudaMemcpyHostToDevice));
+    cusparseDnVecDescr_t d_result_vec;
+    checkCusparse(cusparseCreateDnVec(&d_result_vec, nVoxels, d_result_data, CUDA_R_32F));
+
+    float* d_additional_data = nullptr;
+    size_t totalVoxels = SpFilter.numRows;
+    checkCudaErrors(cudaMalloc((void**)&d_additional_data, totalVoxels*sizeof(float)));
+    std::vector<float> h_additional_data(totalVoxels, 0.0f);
+    cusparseDnVecDescr_t d_additional_vec;
+    checkCusparse(cusparseCreateDnVec(&d_additional_vec, totalVoxels,
+        d_additional_data, CUDA_R_32F));
+
+    cusparseHandle_t handle = nullptr;
+    checkCusparse(cusparseCreate(&handle));
+    // prepare buffer
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    size_t bufferSize = 0;
+    void* dBuffer = nullptr;
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, SpOARmat.matA, d_weight_vec, &beta, d_result_vec, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
+    checkCudaErrors(cudaMalloc(&dBuffer, bufferSize));
+
+    // prepare additional buffer
+    size_t additionalBufferSize = 0;
+    void* dAdditionalBuffer = nullptr;
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, SpFilter.matA, d_result_vec, &beta, d_additional_vec, CUDA_R_32F,
+        CUSPARSE_SPMV_ALG_DEFAULT, &additionalBufferSize));
+    checkCudaErrors(cudaMalloc((void**)&dAdditionalBuffer, additionalBufferSize));
+
+    #if slicingTiming
+        cudaEvent_t start, stop;
+        float milliseconds = 0.0f;
+        checkCudaErrors(cudaEventCreate(&start));
+        checkCudaErrors(cudaEventCreate(&stop));
+    #endif
+
+    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    resultFolder /= std::string("BeamDoseMat");
+    if (! fs::is_directory(resultFolder))
+        fs::create_directory(resultFolder);
+    
+    size_t localBegin = 0;
+    for (size_t i=0; i<OARMatrices.size(); i++) {
+        size_t localNumBeamlets = OARMatrices[i].getCols();
+        std::fill(h_weight_data.begin(), h_weight_data.end(), 0.0f);
+        std::fill(h_weight_data.begin() + localBegin, h_weight_data.begin()
+            + localBegin + localNumBeamlets, 1.0f);
+        localBegin += localNumBeamlets;
+        checkCudaErrors(cudaMemcpy(d_weight_data, h_weight_data.data(),
+            totalNumBeamlets*sizeof(float), cudaMemcpyHostToDevice));
+        
+        #if slicingTiming
+            cudaEventRecord(start);
+        #endif
+        checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+            &alpha, SpOARmat.matA, d_weight_vec, &beta, d_result_vec, CUDA_R_32F,
+            CUSPARSE_SPMV_ALG_DEFAULT, dBuffer));
+        #if slicingTiming
+            cudaEventRecord(stop);
+            cudaEventSynchronize(stop);
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            std::cout << "Beamlet " << i << " multiplication, time elapsed: "
+                << milliseconds * 0.001f << " [s]" << std::endl;
+        #endif
+
+        checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+            &alpha, SpFilter.matA, d_result_vec, &beta, d_additional_vec, CUDA_R_32F,
+            CUSPARSE_SPMV_ALG_DEFAULT, dAdditionalBuffer));
+        checkCudaErrors(cudaMemcpy(h_additional_data.data(), d_additional_data,
+            totalVoxels*sizeof(float), cudaMemcpyDeviceToHost));
+        fs::path file = resultFolder / (std::string("beam")
+            + std::to_string(i) + std::string(".bin"));
+        std::ofstream f(file.string());
+        if (! f.is_open()) {
+            std::cerr << "Cannot open file: " << file << std::endl;
+            return 1;
+        }
+        f.write((char*)(h_additional_data.data()), totalVoxels*sizeof(float));
+        f.close();
+        std::cout << file << std::endl << std::endl;
+    }
+
+    // clean up
+    checkCudaErrors(cudaEventDestroy(stop));
+    checkCudaErrors(cudaEventDestroy(start));
+    checkCudaErrors(cudaFree(dAdditionalBuffer));
+    checkCudaErrors(cudaFree(dBuffer));
+    checkCusparse(cusparseDestroy(handle));
+    checkCusparse(cusparseDestroyDnVec(d_additional_vec));
+    checkCudaErrors(cudaFree(d_additional_data));
+    checkCusparse(cusparseDestroyDnVec(d_result_vec));
+    checkCudaErrors(cudaFree(d_result_data));
+    checkCusparse(cusparseDestroyDnVec(d_weight_vec));
+    checkCudaErrors(cudaFree(d_weight_data));
+    return 0;
+}

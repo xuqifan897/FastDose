@@ -100,12 +100,17 @@ namespace IMRT {
     bool parallelMatCoalease(MatCSR_Eigen& OARmat, MatCSR_Eigen& OARmatT,
         const std::vector<MatCSR_Eigen>& OARMatrices,
         const std::vector<MatCSR_Eigen>& OARMatricesT);
+    
+    class MatCSR64;
+    bool SpOARmatInit(MatCSR64& SpOARmat, MatCSR64& SpOARmatT,
+        const MatCSR_Eigen& OARmat, const MatCSR_Eigen& OARmatT);
 
     bool MatOARSlicing(const MatCSR_Eigen& matrixT, MatCSR_Eigen& A,
         MatCSR_Eigen& AT, const std::vector<StructInfo>& structs);
 
     bool OARFiltering(const std::string& resultFolder,
-        const std::vector<StructInfo>& structs);
+        const std::vector<StructInfo>& structs,
+        MatCSR64& SpOARmat, MatCSR64& SpOARmatT);
 
     bool getStructFilter(MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
         const std::vector<StructInfo>& structs);

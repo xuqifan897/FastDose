@@ -66,85 +66,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    #if false
-        IMRT::MatCSR_Eigen matCsrT_eigen;
-        fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-        doseMatFolder /= std::string("doseMatFolder");
-        if (mode == 0) {
-            matEns->tofile(doseMatFolder.string());
-            delete matEns;
-            return;
-        } else if (mode == 1) {
-            matCsrT_eigen.fromEnsemble(*matEns);
-            delete matEns;
-        } else if (mode == 2) {
-            const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
-            size_t numCols = phantomDim[0] * phantomDim[1] * phantomDim[2];
-            matCsrT_eigen.fromfile(doseMatFolder.string(), numCols);
-        }
-        #if true
-            IMRT::test_MatCSR_load(matCsrT_eigen, doseMatFolder.string());
-        #endif
-
-        IMRT::MatCSR_Eigen A_Eigen, AT_Eigen;
-        IMRT::MatOARSlicing(matCsrT_eigen, A_Eigen, AT_Eigen, structs);
-    #endif
-
-    #if false
-        fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-        doseMatFolder /= std::string("doseMatFolder");
-        if (mode == 0) {
-            matEns->tofile(doseMatFolder.string());
-            return;
-        } else if (mode == 2) {
-            const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
-            size_t numColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
-            matEns = new IMRT::MatCSREnsemble(numColsPerMat);
-            matEns->fromfile(doseMatFolder.string());
-        }
-
-        #if false
-            IMRT::sparseValidation(matEns);
-        #endif
-
-        IMRT::MatCSR64 *matrixT;
-        matrixT = new IMRT::MatCSR64;
-        matrixT->fuseEnsemble(*matEns);
-        delete matEns;
-
-        #if false
-            IMRT::conversionValidation(matrix, *matEns);
-        #endif
-
-        // A, AT are the sub-blocks of matrix above, containing only the OAR voxels
-        IMRT::MatCSR64 *A, *AT;
-        A = new IMRT::MatCSR64;
-        AT = new IMRT::MatCSR64;
-
-        IMRT::MatOARSlicing(*matrixT, *A, *AT, structs);
-        delete matrixT;
-    #endif
-
-
-    #if false
-        if (mode == 1) {
-
-        } else if (mode == 2) {
-            fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-            doseMatFolder /= std::string("doseMatFolder");
-            const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
-            size_t numColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
-            IMRT::MatCSR32_fromfile(doseMatFolder.string(), numColsPerMat, structs);
-        } else {
-            std::cerr << "the \"mode\" parameter should be among 0, 1, and 2, but "
-                << mode << "received." << std::endl;
-            return 1;
-        }
-    #endif
-
+    IMRT::MatCSR64 SpOARmat, SpOARmatT;
     if (mode == 2) {
         fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
             doseMatFolder /= std::string("doseMatFolder");
-        IMRT::OARFiltering(doseMatFolder.string(), structs);
+        IMRT::OARFiltering(doseMatFolder.string(), structs, SpOARmat, SpOARmatT);
     }
 }

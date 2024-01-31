@@ -25,6 +25,8 @@ namespace IMRT {
     bool test_MatCSR_host();
     bool test_MatCSR_load(const MatCSR_Eigen& input, const std::string& doseMatFolder);
     bool test_MatFilter(const MatCSR32& matFilter, const MatCSR32& matFilterT);
+    bool test_SpMatOAR(const MatCSR64& SpOARmat, const MatCSR64& SpOARmatT,
+        const MatCSR_Eigen& filter, const std::vector<MatCSR_Eigen>& OARMatrices);
 }
 
 #endif
