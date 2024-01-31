@@ -2,8 +2,8 @@
 #include <chrono>
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
-
 #include "IMRTDoseMatEigen.cuh"
+#include "IMRTDoseMatEns.cuh"
 
 bool IMRT::MatCSR_Eigen::customInit(
     EigenIdxType nRows, EigenIdxType nCols, EigenIdxType nnz,
@@ -219,15 +219,14 @@ IMRT::MatCSR_Eigen operator*(const IMRT::MatCSR_Eigen& a, const IMRT::MatCSR_Eig
 }
 
 
-IMRT::MatCSR_Eigen IMRT::MatCSR_Eigen::transpose() {
-    Eigen::SparseMatrix<float, Eigen::RowMajor, EigenIdxType>* pointer = this;
+IMRT::MatCSR_Eigen IMRT::MatCSR_Eigen::transpose() const {
+    const Eigen::SparseMatrix<float, Eigen::RowMajor, EigenIdxType>* pointer = this;
     SparseMatrix<float, Eigen::RowMajor, EigenIdxType> intermediate = pointer->transpose();
     MatCSR_Eigen result;
     result.swap(intermediate);
     return result;
 }
 
-#define slicingTiming true
 
 bool IMRT::MatOARSlicing(const MatCSR_Eigen& matrixT, MatCSR_Eigen& A,
     MatCSR_Eigen& AT, const std::vector<StructInfo>& structs

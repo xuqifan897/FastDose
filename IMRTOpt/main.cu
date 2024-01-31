@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
             size_t numCols = phantomDim[0] * phantomDim[1] * phantomDim[2];
             matCsrT_eigen.fromfile(doseMatFolder.string(), numCols);
         }
-        #if false
+        #if true
             IMRT::test_MatCSR_load(matCsrT_eigen, doseMatFolder.string());
         #endif
 
@@ -126,17 +126,25 @@ int main(int argc, char** argv) {
     #endif
 
 
-    if (mode == 1) {
+    #if false
+        if (mode == 1) {
 
-    } else if (mode == 2) {
+        } else if (mode == 2) {
+            fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
+            doseMatFolder /= std::string("doseMatFolder");
+            const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
+            size_t numColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
+            IMRT::MatCSR32_fromfile(doseMatFolder.string(), numColsPerMat, structs);
+        } else {
+            std::cerr << "the \"mode\" parameter should be among 0, 1, and 2, but "
+                << mode << "received." << std::endl;
+            return 1;
+        }
+    #endif
+
+    if (mode == 2) {
         fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-        doseMatFolder /= std::string("doseMatFolder");
-        const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
-        size_t numColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
-        IMRT::MatCSR32_fromfile(doseMatFolder.string(), numColsPerMat, structs);
-    } else {
-        std::cerr << "the \"mode\" parameter should be among 0, 1, and 2, but "
-            << mode << "received." << std::endl;
-        return 1;
+            doseMatFolder /= std::string("doseMatFolder");
+        IMRT::OARFiltering(doseMatFolder.string(), structs);
     }
 }
