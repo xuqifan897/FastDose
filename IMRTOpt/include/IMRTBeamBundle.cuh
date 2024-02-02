@@ -38,6 +38,9 @@ namespace IMRT {
         const std::vector<uint8_t>& PTV_mask,
         const fastdose::DENSITY_h& density_h,
         cudaStream_t stream=0);
+    
+    bool beamletFlagSave(const std::vector<BeamBundle>& beam_bundles,
+        const std::string& resultFile);
 
     __global__ void
     d_beamletFlagInit(

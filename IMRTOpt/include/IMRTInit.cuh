@@ -37,6 +37,33 @@ namespace IMRT {
 
     bool specInit(fastdose::SPECTRUM_h& spectrum_h);
     bool kernelInit(fastdose::KERNEL_h& kernel_h);
+
+
+    class Params {
+    public:
+        Params(): beamWeight(0), gamma(0), eta(0), numBeamsWeWant(0), stepSize(0),
+            maxIter(0), showTrigger(1), changeWeightsTrigger(1) {}
+        float beamWeight;
+        float gamma;
+        float eta;
+        int numBeamsWeWant;
+        float stepSize;
+        int maxIter;
+        int showTrigger;
+        int changeWeightsTrigger;
+    };
+
+    bool ParamsInit(Params& params);
 }
+
+#define DECLARE_PUBLIC_MEMBERS \
+    MEMBER(float, beamWeight) \
+    MEMBER(float, gamma) \
+    MEMBER(float, eta) \
+    MEMBER(int, numBeamsWeWant) \
+    MEMBER(float, stepSize) \
+    MEMBER(int, maxIter) \
+    MEMBER(int, showTrigger) \
+    MEMBER(int, changeWeightsTrigger)
 
 #endif

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <omp.h>
 #include <bitset>
 #include <boost/filesystem.hpp>
@@ -293,5 +294,171 @@ bool IMRT::parallelMatCoalease(
         std::cout << "OARmat initialization time elapsed: " << duration.count() * 0.001f
             << " [s]" << std::endl;
     #endif
+    return 0;
+}
+
+
+bool IMRT::DxyInit(IMRT::MatCSR_Eigen& Dxy, size_t size) {
+    size_t Dxy_nnz = 2 * (size - 1);
+    EigenIdxType* Dxy_offsets = (EigenIdxType*)malloc((size+1)*sizeof(EigenIdxType));
+    EigenIdxType* Dxy_columns = new EigenIdxType[Dxy_nnz];
+    float* Dxy_values = new float[Dxy_nnz];
+
+    for (size_t i=0; i<size; i++) {
+        Dxy_offsets[i] = 2 * i;
+    }
+    Dxy_offsets[size] = Dxy_offsets[size-1];    
+
+    for (size_t i=0; i<size-1; i++) {
+        Dxy_columns[2 * i] = i;
+        Dxy_columns[2 * i + 1] = i + 1;
+        Dxy_values[2 * i] = -1.0f;
+        Dxy_values[2 * i + 1] = 1.0f;
+    }
+    Dxy.customInit(size, size, Dxy_nnz,
+        Dxy_offsets, Dxy_columns, Dxy_values);
+    return 0;
+}
+
+bool IMRT::IdentityInit(IMRT::MatCSR_Eigen& Id, size_t size) {
+    size_t Id_nnz = size;
+    EigenIdxType* Id_offsets = (EigenIdxType*)malloc((size+1)*sizeof(EigenIdxType));
+    EigenIdxType* Id_columns = new EigenIdxType[Id_nnz];
+    float* Id_values = new float[Id_nnz];
+    for (size_t i=0; i<Id_nnz; i++) {
+        Id_offsets[i] = i;
+        Id_columns[i] = i;
+        Id_values[i] = 1.0f;
+    }
+    Id_offsets[size] = Id_nnz;
+    Id.customInit(size, size, size,
+        Id_offsets, Id_columns, Id_values);
+    return 0;
+}
+
+
+bool IMRT::KroneckerProduct(const MatCSR_Eigen& A,
+    const MatCSR_Eigen& B, MatCSR_Eigen& C
+) {
+    size_t C_nnz = A.getNnz() * B.getNnz();
+    size_t C_rows = A.getRows() * B.getRows();
+    size_t C_cols = A.getCols() * B.getCols();
+
+    EigenIdxType* C_offsets = (EigenIdxType*)malloc((C_rows + 1) * sizeof(EigenIdxType));
+    C_offsets[0] = 0;
+    EigenIdxType* C_columns = new EigenIdxType[C_nnz];
+    float* C_values = new float[C_nnz];
+
+    const EigenIdxType* A_offsets = A.getOffset();
+    const EigenIdxType* A_columns = A.getIndices();
+    const float* A_values = A.getValues();
+
+    const EigenIdxType* B_offsets = B.getOffset();
+    const EigenIdxType* B_columns = B.getIndices();
+    const float* B_values = B.getValues();
+
+    for (size_t A_row=0; A_row<A.getRows(); A_row++) {
+        size_t row_base = A_row * B.getRows();
+        size_t nnz_base = A_offsets[A_row] * B.getNnz();
+        
+        size_t A_idx_start = A_offsets[A_row];
+        size_t A_idx_end = A_offsets[A_row + 1];
+        size_t A_nnz_this_row = A_idx_end - A_idx_start;
+
+        for (size_t B_row=0; B_row<B.getRows(); B_row++) {
+            size_t B_idx_start = B_offsets[B_row];
+            size_t B_idx_end = B_offsets[B_row + 1];
+            size_t B_nnz_this_row = B_idx_end - B_idx_start;
+
+            size_t C_nnz_this_row = A_nnz_this_row * B_nnz_this_row;
+            size_t C_row = row_base + B_row;
+            C_offsets[C_row + 1] = C_offsets[C_row] + C_nnz_this_row;
+
+            for (size_t A_idx=A_idx_start; A_idx<A_idx_end; A_idx++) {
+                EigenIdxType A_col = A_columns[A_idx];
+                float A_val = A_values[A_idx];
+
+                EigenIdxType C_col_base = A_col * B.getCols();
+
+                for (size_t B_idx=B_idx_start; B_idx<B_idx_end; B_idx++) {
+                    EigenIdxType B_col = B_columns[B_idx];
+                    float B_val = B_values[B_idx];
+
+                    EigenIdxType C_col = C_col_base + B_col;
+                    float C_val = A_val * B_val;
+                    C_columns[nnz_base] = C_col;
+                    C_values[nnz_base] = C_val;
+                    nnz_base ++;
+                }
+            }
+        }
+    }
+
+    C.customInit(C_rows, C_cols, C_nnz,
+        C_offsets, C_columns, C_values);
+    return 0;
+}
+
+
+bool IMRT::test_KroneckerProduct() {
+    MatCSR_Eigen A, B, AkB, BkA;
+
+    EigenIdxType* A_offset = (EigenIdxType*)malloc(4*sizeof(EigenIdxType));
+    EigenIdxType* A_columns = new EigenIdxType[3];
+    float* A_values = new float[3];
+    A_offset[0] = 0; A_offset[1] = 1; A_offset[2] = 2; A_offset[3] = 3;
+    A_columns[0] = 1; A_columns[1] = 2; A_columns[2] = 0;
+    A_values[0] = 2.0f; A_values[1] = 1.0f; A_values[2] = 3.0f; 
+    A.customInit(3, 3, 3, A_offset, A_columns, A_values);
+
+    EigenIdxType* B_offset = (EigenIdxType*)malloc(5*sizeof(EigenIdxType));
+    EigenIdxType* B_columns = new EigenIdxType[4];
+    float* B_values = new float[4];
+    B_offset[0] = 0; B_offset[1] = 1; B_offset[2] = 2; B_offset[3] = 3; B_offset[4] = 4;
+    B_columns[0] = 3; B_columns[1] = 2; B_columns[2] = 1; B_columns[3] = 0;
+    B_values[0] = 1.0f; B_values[1] = 1.0f; B_values[2] = 1.0f; B_values[3] = 1.0f;
+    B.customInit(4, 4, 4, B_offset, B_columns, B_values);
+
+    KroneckerProduct(A, B, AkB);
+    KroneckerProduct(B, A, BkA);
+
+    std::cout << std::fixed << std::setprecision(0) << "A:" << std::endl << A << std::endl;
+    std::cout << "B:" << std::endl << B << std::endl;
+    std::cout << "Kronecker(A, B):" << std::endl << AkB << std::endl;
+    std::cout << "Kronecker(B, A):" << std::endl << BkA << std::endl;
+    return 0;
+}
+
+
+bool IMRT::filterConstruction(MatCSR_Eigen& filter, const std::vector<uint8_t>& array) {
+    size_t totalNumElements = array.size();
+    size_t BeamletFilter_nnz = 0;
+    for (size_t i=0; i<totalNumElements; i++)
+        BeamletFilter_nnz += (array[i] > 0);
+    EigenIdxType* BeamletFilter_offsets = (EigenIdxType*)malloc(
+        (totalNumElements+1)*sizeof(EigenIdxType));
+    BeamletFilter_offsets[0] = 0;
+    EigenIdxType* BeamletFilter_columns = new EigenIdxType[BeamletFilter_nnz];
+    float* BeamletFilter_values = new float[BeamletFilter_nnz];
+    
+    size_t BeamletFilterIdx = 0;
+    for (size_t i=0; i<totalNumElements; i++) {
+        if(array[i] > 0) {
+            BeamletFilter_columns[BeamletFilterIdx] = BeamletFilterIdx;
+            BeamletFilter_values[BeamletFilterIdx] = 1.0f;
+            BeamletFilterIdx ++;
+        }
+        BeamletFilter_offsets[i+1] = BeamletFilterIdx;
+    }
+    filter.customInit(totalNumElements, BeamletFilter_nnz, BeamletFilter_nnz,
+        BeamletFilter_offsets, BeamletFilter_columns, BeamletFilter_values);
+    return 0;
+}
+
+bool IMRT::test_filterConstruction() {
+    std::vector<uint8_t> array{1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1};
+    MatCSR_Eigen filter;
+    filterConstruction(filter, array);
+    std::cout << std::fixed << std::setprecision(0) << filter << std::endl;
     return 0;
 }

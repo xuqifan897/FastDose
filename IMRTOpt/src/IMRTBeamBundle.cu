@@ -535,3 +535,35 @@ bool IMRT::BeamBundle::beamletInit(fastdose::BEAM_h& beam_h, int idx_x,
 
     return 0;
 }
+
+
+bool IMRT::beamletFlagSave(const std::vector<BeamBundle>& beam_bundles,
+    const std::string& resultFile) {
+    // get the full output buffer
+    size_t numElementsPerBB = beam_bundles[0].fluenceDim.x * beam_bundles[0].fluenceDim.y;
+    size_t totalNumElements = beam_bundles.size() * numElementsPerBB;
+    std::vector<uint8_t> outputBuffer(totalNumElements, 0);
+    size_t outputBufferIdx = 0;
+    for (int i=0; i<beam_bundles.size(); i++) {
+        const BeamBundle& current_beam_bundle = beam_bundles[i];
+        const std::vector<bool>& beamletFlag = current_beam_bundle.beamletFlag;
+        if (beamletFlag.size() != numElementsPerBB) {
+            std::cerr << "The fluence map vector size is inconsistent with "
+                "the fluence map size." << std::endl;
+            return 1;
+        }
+        for (size_t j=0; j<numElementsPerBB; j++) {
+            outputBuffer[outputBufferIdx] = beamletFlag[j];
+            outputBufferIdx ++;
+        }
+    }
+    std::ofstream f(resultFile);
+    if (! f.is_open()) {
+        std::cerr << "Cannot open file: " << resultFile << std::endl;
+        return 1;
+    }
+    f.write((char*)outputBuffer.data(), totalNumElements*sizeof(uint8_t));
+    f.close();
+    std::cout << "Saving \"" << resultFile << "\" complets." << std::endl;
+    return 0;
+}

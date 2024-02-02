@@ -1,4 +1,6 @@
+#include <iomanip>
 #include <chrono>
+#include <Eigen/Dense>
 #include "IMRTDoseMatEigen.cuh"
 #include "IMRTDoseMat.cuh"
 #include "IMRTInit.cuh"
@@ -37,10 +39,18 @@ bool IMRT::OARFiltering(
         }
     #endif
 
-    if (SpOARmatInit(SpOARmat, SpOARmatT, OARMat, OARMatT)) {
-        std::cerr << "Error converting OARmat from CPU to GPU." << std::endl;
-        return 1;
+    #if slicingTiming
+        auto time0 = std::chrono::high_resolution_clock::now();
+    #endif
+    if (Eigen2Cusparse(OARMat, SpOARmat) || Eigen2Cusparse(OARMatT, SpOARmatT)) {
+        std::cerr << "Error loading OARmat and OARmatT from CPU to GPU." << std::endl;
     }
+    #if slicingTiming
+        auto time1 = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time0);
+        std::cout << "Loading OARMat and OARMatT to device time elapsed: "
+            << duration.count() * 0.001f << " [s]" << std::endl;
+    #endif
 
     #if false
         if(test_SpMatOAR(SpOARmat, SpOARmatT, filter, OARMatrices)) {
@@ -140,93 +150,147 @@ bool IMRT::getStructFilter (
     return 0;
 }
 
-
-bool IMRT::SpOARmatInit(MatCSR64& SpOARmat, MatCSR64& SpOARmatT,
-    const MatCSR_Eigen& OARmat, const MatCSR_Eigen& OARmatT
+bool IMRT::fluenceGradInit(
+    MatCSR64& SpFluenceGrad, MatCSR64& SpFluenceGradT,
+    const std::string& fluenceMapPath, int fluenceDim
 ) {
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
     #endif
-
-    size_t* SpOARmat_offsets = nullptr;
-    size_t* SpOARmat_columns = nullptr;
-    float* SpOARmat_values = nullptr;
-
-    size_t* SpOARmatT_offsets = nullptr;
-    size_t* SpOARmatT_columns = nullptr;
-    float* SpOARmatT_values = nullptr;
-
-    size_t SpOARmat_numRows = OARmat.getRows();
-    size_t SpOARmatT_numRows = OARmatT.getRows();
-    size_t nnz = OARmat.getNnz();
-    if (nnz != OARmatT.getNnz()) {
-        std::cerr << "The number of non-zero elements for OARmat "
-            "and OARmatT should be equal" << std::endl;
+    size_t numElementsPerBB = fluenceDim * fluenceDim;
+    std::ifstream f(fluenceMapPath);
+    f.seekg(0, std::ios::end);
+    size_t totalNumElements = f.tellg() / sizeof(uint8_t);
+    f.seekg(0, std::ios::beg);
+    std::vector<uint8_t> fluenceArray(totalNumElements);
+    f.read((char*)fluenceArray.data(), totalNumElements*sizeof(uint8_t));
+    f.close();
+    
+    if (totalNumElements % numElementsPerBB != 0) {
+        std::cerr << "The total number of elements is supposed to be a "
+            "multiple of the number of pixels in a beam, which is not satisfied." << std::endl;
         return 1;
     }
+    size_t nBeams = totalNumElements / numElementsPerBB;
 
-    checkCudaErrors(cudaMalloc((void**)&SpOARmat_offsets, (SpOARmat_numRows+1)*sizeof(size_t)));
-    checkCudaErrors(cudaMalloc((void**)&SpOARmat_columns, nnz * sizeof(size_t)));
-    checkCudaErrors(cudaMalloc((void**)&SpOARmat_values, nnz * sizeof(float)));
+    MatCSR_Eigen Dxy, Id, IdNbeams, Dx0, Dy0, Dx, Dy;
+    DxyInit(Dxy, fluenceDim);
+    IdentityInit(Id, fluenceDim);
+    IdentityInit(IdNbeams, nBeams);
+    KroneckerProduct(Id, Dxy, Dx0);
+    KroneckerProduct(Dxy, Id, Dy0);
+    KroneckerProduct(IdNbeams, Dx0, Dx);
+    KroneckerProduct(IdNbeams, Dy0, Dy);
 
-    checkCudaErrors(cudaMalloc((void**)&SpOARmatT_offsets, (SpOARmatT_numRows+1)*sizeof(size_t)));
-    checkCudaErrors(cudaMalloc((void**)&SpOARmatT_columns, nnz * sizeof(size_t)));
-    checkCudaErrors(cudaMalloc((void**)&SpOARmatT_values, nnz * sizeof(float)));
+    // construct filtering matrix
+    MatCSR_Eigen BeamletFilter;
+    filterConstruction(BeamletFilter, fluenceArray);
+    Dx = Dx * BeamletFilter;
+    Dy = Dy * BeamletFilter;
 
-    int nStreams = 6;
-    std::vector<cudaStream_t> streams(nStreams);
-    for (int i=0; i<nStreams; i++)
-        checkCudaErrors(cudaStreamCreate(&streams[i]));
-    
-    checkCudaErrors(cudaMemcpyAsync(SpOARmat_offsets, OARmat.getOffset(),
-        (SpOARmat_numRows+1)*sizeof(size_t), cudaMemcpyHostToDevice, streams[0]));
-    checkCudaErrors(cudaMemcpyAsync(SpOARmat_columns, OARmat.getIndices(),
-        nnz * sizeof(size_t), cudaMemcpyHostToDevice, streams[1]));
-    checkCudaErrors(cudaMemcpyAsync(SpOARmat_values, OARmat.getValues(),
-        nnz * sizeof(float), cudaMemcpyHostToDevice, streams[2]));
-    
-    checkCudaErrors(cudaMemcpyAsync(SpOARmatT_offsets, OARmatT.getOffset(),
-        (SpOARmatT_numRows + 1) * sizeof(size_t), cudaMemcpyHostToDevice, streams[3]));
-    checkCudaErrors(cudaMemcpyAsync(SpOARmatT_columns, OARmatT.getIndices(),
-        nnz * sizeof(size_t), cudaMemcpyHostToDevice, streams[4]));
-    checkCudaErrors(cudaMemcpyAsync(SpOARmatT_values, OARmatT.getValues(),
-        nnz * sizeof(float), cudaMemcpyHostToDevice, streams[5]));
+    size_t numActiveBeamlets = BeamletFilter.getCols();
+    Eigen::VectorXf sumVec(numActiveBeamlets);
+    for (size_t i=0; i<numActiveBeamlets; i++)
+        sumVec[i] = 1.0f;
 
-    for (int i=0; i<nStreams; i++)
-        cudaStreamSynchronize(streams[i]);
-    for (int i=0; i<nStreams; i++)
-        cudaStreamDestroy(streams[i]);
-    
-    checkCusparse(cusparseCreateCsr(
-        &SpOARmat.matA, OARmat.getRows(), OARmat.getCols(), OARmat.getNnz(),
-        SpOARmat_offsets, SpOARmat_columns, SpOARmat_values,
-        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I,
-        CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
-    checkCusparse(cusparseCreateCsr(
-        &SpOARmatT.matA, OARmatT.getRows(), OARmatT.getCols(), OARmatT.getNnz(),
-        SpOARmatT_offsets, SpOARmatT_columns, SpOARmatT_values,
-        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I,
-        CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
-    
-    SpOARmat.d_csr_offsets = SpOARmat_offsets;
-    SpOARmat.d_csr_columns = SpOARmat_columns;
-    SpOARmat.d_csr_values = SpOARmat_values;
-    SpOARmat.numRows = OARmat.getRows();
-    SpOARmat.numCols = OARmat.getCols();
-    SpOARmat.nnz = OARmat.getNnz();
+    Eigen::VectorXf Dxsum1 = Dx * sumVec;
+    Eigen::VectorXf Dxsum2 = Dx.cwiseAbs() * sumVec;
+    std::vector<uint8_t> Dx_filter_array(Dxsum1.size());
+    for (size_t i=0; i<Dxsum1.size(); i++)
+        Dx_filter_array[i] = (std::abs(Dxsum1[i]) < 1e-4f) && (Dxsum2[i] > 1e-4f);
+    MatCSR_Eigen Dx_filter;
+    filterConstruction(Dx_filter, Dx_filter_array);
+    Dx = Dx_filter.transpose() * Dx;
 
-    SpOARmatT.d_csr_offsets = SpOARmatT_offsets;
-    SpOARmatT.d_csr_columns = SpOARmatT_columns;
-    SpOARmatT.d_csr_values = SpOARmatT_values;
-    SpOARmatT.numRows = OARmatT.getRows();
-    SpOARmatT.numCols = OARmatT.getCols();
-    SpOARmatT.nnz = OARmatT.getNnz();
+    Eigen::VectorXf Dysum1 = Dy * sumVec;
+    Eigen::VectorXf Dysum2 = Dy.cwiseAbs() * sumVec;
+    std::vector<uint8_t> Dy_filter_array(Dysum1.size());
+    for (size_t i=0; i<Dysum1.size(); i++)
+        Dy_filter_array[i] = (std::abs(Dysum1[i]) < 1e-4f) && (Dysum2[i] > 1e-4f);
+    MatCSR_Eigen Dy_filter;
+    filterConstruction(Dy_filter, Dy_filter_array);
+    Dy = Dy_filter.transpose() * Dy;
+
+    // concatenate Dx and Dy
+    MatCSR_Eigen Dxy_concat;
+    size_t Dxy_numRows = Dx.getRows() + Dy.getRows();
+    size_t Dxy_numCols = Dx.getCols();
+    size_t Dxy_nnz = Dx.getNnz() + Dy.getNnz();
+    EigenIdxType* Dxy_concat_offset = (EigenIdxType*)malloc((Dxy_numRows+1)*sizeof(EigenIdxType));
+    EigenIdxType* Dxy_concat_columns = new EigenIdxType[Dxy_nnz];
+    float* Dxy_concat_values = new float[Dxy_nnz];
     
+    EigenIdxType* Dx_offsets = *Dx.getOffset();
+    EigenIdxType* Dy_offsets = *Dy.getOffset();
+    std::copy(Dx_offsets, Dx_offsets + Dx.getRows() + 1, Dxy_concat_offset);
+    size_t offsets_offset = Dxy_concat_offset[Dx.getRows()];
+    for (size_t i=0; i<Dy.getRows(); i++) {
+        Dxy_concat_offset[Dx.getRows() + i + 1] = offsets_offset + Dy_offsets[i + 1];
+    }
+
+    const EigenIdxType* Dx_columns = Dx.getIndices();
+    const EigenIdxType* Dy_columns = Dy.getIndices();
+    std::copy(Dx_columns, Dx_columns + Dx.getNnz(), Dxy_concat_columns);
+    std::copy(Dy_columns, Dy_columns + Dy.getNnz(), Dxy_concat_columns + Dx.getNnz());
+
+    const float* Dx_values = Dx.getValues();
+    const float* Dy_values = Dy.getValues();
+    std::copy(Dx_values, Dx_values + Dx.getNnz(), Dxy_concat_values);
+    std::copy(Dy_values, Dy_values + Dy.getNnz(), Dxy_concat_values + Dx.getNnz());
+
+    Dxy_concat.customInit(Dxy_numRows, Dxy_numCols, Dxy_nnz,
+        Dxy_concat_offset, Dxy_concat_columns, Dxy_concat_values);
+
+
+    // load to GPU
+    if (Eigen2Cusparse(Dxy_concat, SpFluenceGrad)) {
+        std::cerr << "Error loading the fluence gradient operator to GPU." << std::endl;
+        return 1;
+    }
+    MatCSR_Eigen Dxy_concatT = Dxy_concat.transpose();
+    if (Eigen2Cusparse(Dxy_concatT, SpFluenceGradT)) {
+        std::cerr << "Error loading the transpose fluence gradient "
+            "operator to GPU." << std::endl;
+        return 1;
+    }
     #if slicingTiming
         auto time1 = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time0);
-        std::cout << "Cusparse matrices initialization time elapsed: "
+        std::cout << "Fluence gradient operator and its transpose construction time elapsed: "
             << duration.count() * 0.001f << " [s]" << std::endl;
     #endif
+    
+    return 0;
+}
+
+
+bool IMRT::Eigen2Cusparse(const MatCSR_Eigen& source, MatCSR64& dest) {
+    // here we assume the destination matrix is an empty one.
+    if (dest.matA != nullptr || dest.d_csr_offsets != nullptr ||
+        dest.d_csr_columns != nullptr || dest.d_csr_values != nullptr ||
+        dest.d_buffer_spmv != nullptr) {
+        std::cerr << "The destination matrix is not empty." << std::endl;
+        return 1;
+    }
+
+    checkCudaErrors(cudaMalloc((void**)&dest.d_csr_offsets, (source.getRows() + 1) * sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&dest.d_csr_columns, source.getNnz() * sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&dest.d_csr_values, source.getNnz() * sizeof(float)));
+
+    checkCudaErrors(cudaMemcpy(dest.d_csr_offsets, source.getOffset(),
+        (source.getRows() + 1) * sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(dest.d_csr_columns, source.getIndices(),
+        source.getNnz() * sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(dest.d_csr_values, source.getValues(),
+        source.getNnz() * sizeof(float), cudaMemcpyHostToDevice));
+    
+    checkCusparse(cusparseCreateCsr(
+        &dest.matA, source.getRows(), source.getCols(), source.getNnz(),
+        dest.d_csr_offsets, dest.d_csr_columns, dest.d_csr_values,
+        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+    
+    dest.numRows = source.getRows();
+    dest.numCols = source.getCols();
+    dest.nnz = source.getNnz();
     return 0;
 }

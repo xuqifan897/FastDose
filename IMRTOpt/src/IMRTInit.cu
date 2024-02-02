@@ -331,3 +331,75 @@ bool IMRT::kernelInit(fastdose::KERNEL_h& kernel_h) {
     #endif
     return 0;
 }
+
+
+bool IMRT::ParamsInit(Params& params) {
+    std::string paramsFile = IMRT::getarg<std::string>("params");
+    std::ifstream f(paramsFile);
+    if (! f.is_open()) {
+        std::cerr << "Cannot open file: " << paramsFile << std::endl;
+        return 1;
+    }
+    std::vector<std::vector<std::string>> data;
+    std::string line;
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        std::vector<std::string> row;
+        std::string value;
+        while (std::getline(ss, value, ',')) {
+            row.push_back(value);
+        }
+        data.push_back(row);
+    }
+    
+    std::vector<std::string> keys {
+        "beamWeight",
+        "gamma",
+        "eta",
+        "numBeamsWeWant",
+        "stepSize",
+        "maxIter",
+        "showTrigger",
+        "ChangeWeightsTrigger"
+    };
+
+    if (data.size() != keys.size()) {
+        std::cerr << "We expect " << keys.size() << " lines, but the file has "
+            << data.size() << " lines." << std::endl;
+        return 1;
+    }
+    for (int i=0; i<keys.size(); i++) {
+        const std::vector<std::string> row = data[i];
+        if (row[0] != keys[i]) {
+            std::cerr << "Key unmatch: " << row[0] << " != " << keys[i] << std::endl;
+            return 1;
+        }
+    }
+    params.beamWeight = std::stof(data[0][1]);
+    params.gamma = std::stof(data[1][1]);
+    params.eta = std::stof(data[2][1]);
+    params.numBeamsWeWant = std::stoi(data[3][1]);
+    params.stepSize = std::stof(data[4][1]);
+    params.maxIter = std::stoi(data[5][1]);
+    params.showTrigger = std::stoi(data[6][1]);
+    params.changeWeightsTrigger = std::stoi(data[7][1]);
+
+    std::vector<std::string> publicMemberValues;
+    std::stringstream valueStream;
+#define MEMBER(type, name) \
+    valueStream << std::scientific << std::setprecision(2) << params.name; \
+    publicMemberValues.push_back(#name + std::string(": ") + valueStream.str()); \
+    valueStream.str("");
+
+    DECLARE_PUBLIC_MEMBERS
+#undef MEMBER
+
+    std::cout << std::scientific << std::setprecision(2) <<
+        "Optimization parameters: " << std::endl;
+    for (const std::string& value : publicMemberValues) {
+        std::cout << "    " << value << std::endl;
+    }
+    std::cout << std::endl;
+
+    return 0;
+}

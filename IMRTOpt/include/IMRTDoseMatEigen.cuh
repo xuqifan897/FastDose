@@ -102,15 +102,15 @@ namespace IMRT {
         const std::vector<MatCSR_Eigen>& OARMatricesT);
     
     class MatCSR64;
-    bool SpOARmatInit(MatCSR64& SpOARmat, MatCSR64& SpOARmatT,
-        const MatCSR_Eigen& OARmat, const MatCSR_Eigen& OARmatT);
-
     bool MatOARSlicing(const MatCSR_Eigen& matrixT, MatCSR_Eigen& A,
         MatCSR_Eigen& AT, const std::vector<StructInfo>& structs);
 
     bool OARFiltering(const std::string& resultFolder,
         const std::vector<StructInfo>& structs,
         MatCSR64& SpOARmat, MatCSR64& SpOARmatT);
+
+    bool fluenceGradInit(MatCSR64& SpFluenceGrad, MatCSR64& SpFluenceGradT,
+        const std::string& fluenceMapPath, int fluenceDim);
 
     bool getStructFilter(MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
         const std::vector<StructInfo>& structs);
@@ -121,6 +121,13 @@ namespace IMRT {
     // start, end in bytes
     void readBlockParallelFunc(const std::string& filename,
         char* buffer, size_t start, size_t end);
+    
+    bool Eigen2Cusparse(const MatCSR_Eigen& source, MatCSR64& dest);
+    bool DxyInit(IMRT::MatCSR_Eigen& Dxy, size_t size);
+    bool IdentityInit(IMRT::MatCSR_Eigen& Id, size_t size);
+    bool KroneckerProduct(const MatCSR_Eigen& A,
+        const MatCSR_Eigen& B, MatCSR_Eigen& C);
+    bool filterConstruction(MatCSR_Eigen& filter, const std::vector<uint8_t>& array);
 
     bool test_parallelSpGEMM(const std::vector<MatCSR_Eigen>& OARMatrices,
         const std::vector<MatCSR_Eigen>& OARMatricesT,
@@ -128,6 +135,9 @@ namespace IMRT {
         const MatCSR_Eigen& filter);
 
     bool test_OARMat_OARMatT(const MatCSR_Eigen& OARMat, const MatCSR_Eigen& OARMatT);
+
+    bool test_KroneckerProduct();
+    bool test_filterConstruction();
 }
 
 IMRT::MatCSR_Eigen operator*(const IMRT::MatCSR_Eigen& a, const IMRT::MatCSR_Eigen& b);
