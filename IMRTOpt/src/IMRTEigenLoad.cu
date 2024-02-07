@@ -4,57 +4,60 @@
 #include "IMRTDoseMatEigen.cuh"
 #include "IMRTDoseMat.cuh"
 #include "IMRTInit.cuh"
+#include "IMRTOptimize.cuh"
 
 bool IMRT::OARFiltering(
     const std::string& resultFolder,
     const std::vector<StructInfo>& structs,
-    MatCSR64& SpOARmat, MatCSR64& SpOARmatT
+    MatCSR64& SpVOIMat, MatCSR64& SpVOIMatT,
+    Weights_h& weights, Weights_d& weights_d
 ) {
     MatCSR_Eigen filter, filterT;
-    if (getStructFilter(filter, filterT, structs)) {
+    if (getStructFilter(filter, filterT, structs, weights)) {
         std::cerr << "OAR filter and its transpose construction error." << std::endl;
         return 1;
     }
-    std::vector<MatCSR_Eigen> OARMatrices;
-    std::vector<MatCSR_Eigen> OARMatricesT;
-    if (parallelSpGEMM(resultFolder, filter, filterT, OARMatrices, OARMatricesT)) {
-        std::cerr << "CPU OAR dose loading matrices and their transpose "
+    weights_d.fromHost(weights);
+    std::vector<MatCSR_Eigen> VOIMatrices;
+    std::vector<MatCSR_Eigen> VOIMatricesT;
+    if (parallelSpGEMM(resultFolder, filter, filterT, VOIMatrices, VOIMatricesT)) {
+        std::cerr << "CPU VOI dose loading matrices and their transpose "
             "construction error." << std::endl;
         return 1;
     }
 
-    MatCSR_Eigen OARMat, OARMatT;
-    if (parallelMatCoalease(OARMat, OARMatT, OARMatrices, OARMatricesT)) {
-        std::cerr << "GPU OAR dose loading matrix and its transpose "
+    MatCSR_Eigen VOIMat, VOIMatT;
+    if (parallelMatCoalease(VOIMat, VOIMatT, VOIMatrices, VOIMatricesT)) {
+        std::cerr << "GPU VOI dose loading matrix and its transpose "
             "construction error." << std::endl;
         return 1;
     }
 
     #if false
-        if(test_OARMat_OARMatT(OARMat, OARMatT)) {
-            std::cerr << "OARMat and OARMatT test error." << std::endl;
+        if(test_VOIMat_VOIMatT(VOIMat, VOIMatT)) {
+            std::cerr << "VOIMat and VOIMatT test error." << std::endl;
             return 1;
         } else {
-            std::cout << "OARMat and OARMatT match each other, test passed!" << std::endl;
+            std::cout << "VOIMat and VOIMatT match each other, test passed!" << std::endl;
         }
     #endif
 
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
     #endif
-    if (Eigen2Cusparse(OARMat, SpOARmat) || Eigen2Cusparse(OARMatT, SpOARmatT)) {
-        std::cerr << "Error loading OARmat and OARmatT from CPU to GPU." << std::endl;
+    if (Eigen2Cusparse(VOIMat, SpVOIMat) || Eigen2Cusparse(VOIMatT, SpVOIMatT)) {
+        std::cerr << "Error loading VOIMat and VOIMatT from CPU to GPU." << std::endl;
     }
     #if slicingTiming
         auto time1 = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time0);
-        std::cout << "Loading OARMat and OARMatT to device time elapsed: "
+        std::cout << "Loading VOIMat and VOIMatT to device time elapsed: "
             << duration.count() * 0.001f << " [s]" << std::endl;
     #endif
 
     #if false
-        if(test_SpMatOAR(SpOARmat, SpOARmatT, filter, OARMatrices)) {
-            std::cerr << "SpOARmat and SpOARmatT validation error." << std::endl;
+        if(test_SpMatOAR(SpVOIMat, SpVOIMatT, filter, VOIMatrices)) {
+            std::cerr << "SpVOIMat and SpVOIMatT validation error." << std::endl;
             return 1;
         }
     #endif
@@ -65,7 +68,7 @@ bool IMRT::OARFiltering(
 
 bool IMRT::getStructFilter (
     MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
-    const std::vector<StructInfo>& structs
+    const std::vector<StructInfo>& structs, Weights_h& weights
 ) {
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
@@ -74,6 +77,10 @@ bool IMRT::getStructFilter (
     std::vector<size_t> nonZeroVoxels;
     size_t totalCount = 0;
     size_t nVoxels = 0;
+    size_t PTV_voxels = 0;
+    size_t OAR_voxels = 0;
+                        // structure, isPTV, nVoxels
+    std::vector<std::tuple<StructInfo, bool, size_t>> structs_valid;
     for (int i=0; i<structs.size(); i++) {
         const StructInfo& currentStruct = structs[i];
         if (currentStruct.maxWeights < eps_fastdose &&
@@ -83,6 +90,10 @@ bool IMRT::getStructFilter (
                 << " is irrelevant in the optimization, skip." << std::endl;
             continue;
         }
+        structs_valid.push_back(std::tuple<StructInfo, bool, size_t>(currentStruct, false, 0));
+        auto & lastEntry = structs_valid.back();
+        std::get<1>(lastEntry) = containsCaseInsensitive(
+            currentStruct.name, std::string("PTV"));
 
         size_t localCount = 0;
         if (nVoxels == 0)
@@ -97,9 +108,25 @@ bool IMRT::getStructFilter (
             localCount += (currentStruct.mask[j] > 0);
         nonZeroVoxels.push_back(localCount);
         totalCount += localCount;
-        std::cout << "Structure: " << currentStruct.name
-            << ", non-zero voxels: " << localCount << std::endl;
+
+        std::get<2>(lastEntry) = localCount;
+        if (std::get<1>(lastEntry))
+            PTV_voxels += localCount;
+        else
+            OAR_voxels += localCount;
     }
+    // sort VOIs to make PTVs before OARs
+    std::sort(structs_valid.begin(), structs_valid.end(), structComp);
+    for (int i=0; i<structs_valid.size(); i++) {
+        const auto& currentTuple = structs_valid[i];
+        std::cout << "Structure: " << std::get<0>(currentTuple).name << ", is PTV? "
+            << std::get<1>(currentTuple) << ", non-zero voxels: "
+            << std::get<2>(currentTuple) << std::endl;
+    }
+    // update structs
+    std::vector<StructInfo> structs_sorted;
+    for (int i=0; i<structs_valid.size(); i++)
+        structs_sorted.push_back(std::get<0>(structs_valid[i]));
     std::cout << "Total number of non-zero voxels: " << totalCount << std::endl << std::endl;
 
     EigenIdxType* h_filterOffsets = (EigenIdxType*)malloc((totalCount+1)*sizeof(EigenIdxType));
@@ -109,8 +136,8 @@ bool IMRT::getStructFilter (
         h_filterValues[i] = 1.0f;
 
     size_t idx = 0;
-    for (int i=0; i<structs.size(); i++) {
-        const StructInfo& currentStruct = structs[i];
+    for (int i=0; i<structs_sorted.size(); i++) {
+        const StructInfo& currentStruct = structs_sorted[i];
         if (currentStruct.maxWeights < eps_fastdose &&
             currentStruct.minDoseTargetWeights < eps_fastdose &&
             currentStruct.OARWeights < eps_fastdose) {
@@ -147,12 +174,56 @@ bool IMRT::getStructFilter (
             << " [s]" << std::endl;
     #endif
 
+
+    // weights initialization
+    weights.voxels_PTV = PTV_voxels;
+    weights.voxels_OAR = OAR_voxels;
+    weights.maxDose.resize(totalCount);  // PTV and OAR
+    weights.maxWeightsLong.resize(totalCount);  // PTV and OAR
+    weights.minDoseTarget.resize(PTV_voxels);  // PTV only
+    weights.minDoseTargetWeights.resize(PTV_voxels);  // PTV only
+    weights.OARWeightsLong.resize(OAR_voxels);  // OAR only
+    size_t offset0 = 0;  // account for the former 4
+    size_t offset1 = 0;  // account for OARWeightsLong
+    for (int i=0; i<structs_valid.size(); i++) {
+        const auto & currentEntry = structs_valid[i];
+        size_t current_num_voxels = std::get<2>(currentEntry);
+        const StructInfo currentStruct = std::get<0>(currentEntry);
+        float maxDose = currentStruct.maxDose;
+        float maxWeights = currentStruct.maxWeights;
+        float minDoseTarget = currentStruct.minDoseTarget;
+        float minDoseTargetWeights = currentStruct.minDoseTargetWeights;
+        float OARWeights = currentStruct.OARWeights;
+        if (std::get<1>(currentEntry)) {
+            // its a PTV
+            for (size_t ii=0; ii<current_num_voxels; ii++) {
+                weights.maxDose[offset0 + ii] = maxDose;
+                weights.maxWeightsLong[offset0 + ii] = maxWeights;
+                weights.minDoseTarget[offset0 + ii] = minDoseTarget;
+                weights.minDoseTargetWeights[offset0 + ii] = minDoseTargetWeights;
+            }
+            offset0 += current_num_voxels;
+            continue;
+        }
+        else {
+            for (size_t ii=0; ii<current_num_voxels; ii++) {
+                weights.maxDose[offset0 + ii] = maxDose;
+                weights.maxWeightsLong[offset0 + ii] = maxWeights;
+                weights.OARWeightsLong[offset1 + ii] = OARWeights;
+            }
+            offset0 += current_num_voxels;
+            offset1 += current_num_voxels;
+            continue;
+        }
+    }
+
     return 0;
 }
 
 bool IMRT::fluenceGradInit(
     MatCSR64& SpFluenceGrad, MatCSR64& SpFluenceGradT,
-    const std::string& fluenceMapPath, int fluenceDim
+    std::vector<uint8_t>& fluenceArray, const std::string& fluenceMapPath,
+    int fluenceDim
 ) {
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
@@ -162,7 +233,7 @@ bool IMRT::fluenceGradInit(
     f.seekg(0, std::ios::end);
     size_t totalNumElements = f.tellg() / sizeof(uint8_t);
     f.seekg(0, std::ios::beg);
-    std::vector<uint8_t> fluenceArray(totalNumElements);
+    fluenceArray.resize(totalNumElements);
     f.read((char*)fluenceArray.data(), totalNumElements*sizeof(uint8_t));
     f.close();
     

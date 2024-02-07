@@ -88,12 +88,28 @@ bool IMRT::BeamBundleInit(std::vector<BeamBundle>& beam_bundles,
     beamletFlagInit(beam_bundles, PTV_mask, density_h);
 
     // initialize beam information
+    size_t totalBeamlets = 0;
     for (int i=0; i<beam_bundles.size(); i++) {
         BeamBundle& current = beam_bundles[i];
         current.beamletsInit(density_h);
         std::cout << "Beam " << i+1 << ", number of active beamlets: "
             << current.beams_h.size() << std::endl;
+        totalBeamlets += current.beams_h.size();
+        
+        #if true
+            size_t localBeamletsOn = 0;
+            for (int j=0; j<fluenceDim * fluenceDim; j++)
+                localBeamletsOn += current.beamletFlag[j];
+            if (current.beams_h.size() != localBeamletsOn) {
+                std::cerr << "the size of beams_h array, " << current.beams_h.size()
+                    << ", is supposed to be the same as the number of active beamlets, "
+                    << localBeamletsOn << std::endl;
+                return 1;
+            }
+        #endif
     }
+    std::cout << "The total number of active active beamlets: " << totalBeamlets
+        << "\n" << std::endl;
     return 0;
 }
 

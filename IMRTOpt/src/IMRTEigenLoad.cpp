@@ -10,8 +10,8 @@ bool IMRT::parallelSpGEMM(
     const std::string& resultFolder,
     const MatCSR_Eigen& filter,
     const MatCSR_Eigen& filterT,
-    std::vector<MatCSR_Eigen>& OARMatrices,
-    std::vector<MatCSR_Eigen>& OARMatricesT
+    std::vector<MatCSR_Eigen>& VOIMatrices,
+    std::vector<MatCSR_Eigen>& VOIMatricesT
 ) {
     #if true
         size_t number1 = 7195446;
@@ -121,22 +121,22 @@ bool IMRT::parallelSpGEMM(
     delete[] h_columnsBuffer;
     delete[] h_valuesBuffer;
 
-    OARMatrices.resize(numMatrices);
-    OARMatricesT.resize(numMatrices);
+    VOIMatrices.resize(numMatrices);
+    VOIMatricesT.resize(numMatrices);
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
-        OARMatricesT[i] = matricesT[i] * filter;
-        OARMatrices[i] = OARMatricesT[i].transpose();
+        VOIMatricesT[i] = matricesT[i] * filter;
+        VOIMatrices[i] = VOIMatricesT[i].transpose();
     }
     #if slicingTiming
         auto time3 = std::chrono::high_resolution_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(time3 - time2);
-        std::cout << "OAR dose loading matrices and their transpose construction time elapsed: "
+        std::cout << "VOI dose loading matrices and their transpose construction time elapsed: "
             << duration.count() * 0.001f << " [s]" << std::endl;
     #endif
 
     #if false
-        test_parallelSpGEMM(OARMatrices, OARMatricesT, matricesT, filter);
+        test_parallelSpGEMM(VOIMatrices, VOIMatricesT, matricesT, filter);
     #endif
 
     return 0;
@@ -182,81 +182,81 @@ void IMRT::readBlockParallelFunc(const std::string& filename,
 }
 
 bool IMRT::parallelMatCoalease(
-    MatCSR_Eigen& OARmat, MatCSR_Eigen& OARmatT,
-    const std::vector<MatCSR_Eigen>& OARMatrices,
-    const std::vector<MatCSR_Eigen>& OARMatricesT
+    MatCSR_Eigen& VOImat, MatCSR_Eigen& VOImatT,
+    const std::vector<MatCSR_Eigen>& VOIMatrices,
+    const std::vector<MatCSR_Eigen>& VOIMatricesT
 ) {
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
     #endif
-    // initialize OARmatT
-    int numMatrices = OARMatricesT.size();
+    // initialize VOImatT
+    int numMatrices = VOIMatricesT.size();
     size_t numRowsTotal_matT = 0;
     size_t nnzTotal_matT = 0;
     for (int i=0; i<numMatrices; i++) {
-        numRowsTotal_matT += OARMatricesT[i].getRows();
-        nnzTotal_matT += OARMatricesT[i].getNnz();
+        numRowsTotal_matT += VOIMatricesT[i].getRows();
+        nnzTotal_matT += VOIMatricesT[i].getNnz();
     }
-    EigenIdxType* OARmatT_offsets = (EigenIdxType*)malloc((numRowsTotal_matT+1)*sizeof(EigenIdxType));
-    OARmatT_offsets[0] = 0;
+    EigenIdxType* VOImatT_offsets = (EigenIdxType*)malloc((numRowsTotal_matT+1)*sizeof(EigenIdxType));
+    VOImatT_offsets[0] = 0;
     size_t offsetsIdx = 0;
     for (int i=0; i<numMatrices; i++) {
-        const MatCSR_Eigen& local_OARMatricesT = OARMatricesT[i];
-        EigenIdxType local_numRows = local_OARMatricesT.getRows();
-        const EigenIdxType* m_outerIndex = local_OARMatricesT.getOffset();
+        const MatCSR_Eigen& local_VOIMatricesT = VOIMatricesT[i];
+        EigenIdxType local_numRows = local_VOIMatricesT.getRows();
+        const EigenIdxType* m_outerIndex = local_VOIMatricesT.getOffset();
         for (EigenIdxType j=0; j<local_numRows; j++) {
-            OARmatT_offsets[offsetsIdx+1] = OARmatT_offsets[offsetsIdx] +
+            VOImatT_offsets[offsetsIdx+1] = VOImatT_offsets[offsetsIdx] +
                 m_outerIndex[j+1] - m_outerIndex[j];
             offsetsIdx++;
         }
     }
     std::vector<EigenIdxType> cumuNnz(numMatrices, 0);
     for (int i=0; i<numMatrices-1; i++) {
-        cumuNnz[i+1] = cumuNnz[i] + OARMatricesT[i].getNnz();
+        cumuNnz[i+1] = cumuNnz[i] + VOIMatricesT[i].getNnz();
     }
-    EigenIdxType* OARmatT_columns = new EigenIdxType[nnzTotal_matT];
-    float* OARmatT_values = new float[nnzTotal_matT];
+    EigenIdxType* VOImatT_columns = new EigenIdxType[nnzTotal_matT];
+    float* VOImatT_values = new float[nnzTotal_matT];
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
         EigenIdxType nnz_offset = cumuNnz[i];
-        const MatCSR_Eigen& localOARMat = OARMatricesT[i];
-        EigenIdxType localNnz = localOARMat.getNnz();
-        const EigenIdxType* localColumns = localOARMat.getIndices();
-        const float* localValues = localOARMat.getValues();
-        std::copy(localColumns, localColumns + localNnz, OARmatT_columns + nnz_offset);
-        std::copy(localValues, localValues + localNnz, OARmatT_values + nnz_offset);
+        const MatCSR_Eigen& localVOIMat = VOIMatricesT[i];
+        EigenIdxType localNnz = localVOIMat.getNnz();
+        const EigenIdxType* localColumns = localVOIMat.getIndices();
+        const float* localValues = localVOIMat.getValues();
+        std::copy(localColumns, localColumns + localNnz, VOImatT_columns + nnz_offset);
+        std::copy(localValues, localValues + localNnz, VOImatT_values + nnz_offset);
     }
     
-    OARmatT.customInit(numRowsTotal_matT, OARMatricesT[0].getCols(), nnzTotal_matT,
-        OARmatT_offsets, OARmatT_columns, OARmatT_values);
+    VOImatT.customInit(numRowsTotal_matT, VOIMatricesT[0].getCols(), nnzTotal_matT,
+        VOImatT_offsets, VOImatT_columns, VOImatT_values);
     #if slicingTiming
         auto time1 = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time0);
-        std::cout << "OARmatT initialization time elapsed: " << duration.count() * 0.001f
+        std::cout << "VOImatT initialization time elapsed: " << duration.count() * 0.001f
             << " [s]" << std::endl;
     #endif
 
     
-    // initialize OARmat
-    Eigen::Index OARmat_numRows = OARMatrices[0].getRows();
-    size_t OARmat_numCols = numRowsTotal_matT;
-    EigenIdxType* m_offsets_OARmat = (EigenIdxType*)malloc((OARmat_numRows+1)*sizeof(EigenIdxType));
-    EigenIdxType* m_columns_OARmat = new EigenIdxType[nnzTotal_matT];
-    float* m_values_OARmat = new float[nnzTotal_matT];
-    // the 2d array to store the starting of every numMatrix at every row of OARmat
+    // initialize VOImat
+    Eigen::Index VOImat_numRows = VOIMatrices[0].getRows();
+    size_t VOImat_numCols = numRowsTotal_matT;
+    EigenIdxType* m_offsets_VOImat = (EigenIdxType*)malloc((VOImat_numRows+1)*sizeof(EigenIdxType));
+    EigenIdxType* m_columns_VOImat = new EigenIdxType[nnzTotal_matT];
+    float* m_values_VOImat = new float[nnzTotal_matT];
+    // the 2d array to store the starting of every numMatrix at every row of VOImat
     std::vector<std::vector<EigenIdxType>> offsets_copy(numMatrices,
-        std::vector<EigenIdxType>(OARmat_numRows, 0));
+        std::vector<EigenIdxType>(VOImat_numRows, 0));
     EigenIdxType currentOffset = 0;
-    m_offsets_OARmat[0] = 0;
-    for (EigenIdxType j=0; j<OARmat_numRows; j++) {
+    m_offsets_VOImat[0] = 0;
+    for (EigenIdxType j=0; j<VOImat_numRows; j++) {
         for (EigenIdxType i=0; i<numMatrices; i++) {
             offsets_copy[i][j] = currentOffset;
-            const MatCSR_Eigen& localOARMat = OARMatrices[i];
-            const EigenIdxType* localOffsets = localOARMat.getOffset();
+            const MatCSR_Eigen& localVOIMat = VOIMatrices[i];
+            const EigenIdxType* localOffsets = localVOIMat.getOffset();
             EigenIdxType nnzThisRow = localOffsets[j+1] - localOffsets[j];
             currentOffset += nnzThisRow;
         }
-        m_offsets_OARmat[j+1] = currentOffset;
+        m_offsets_VOImat[j+1] = currentOffset;
     }
     if (currentOffset != nnzTotal_matT) {
         std::cerr << "Error, currentOffset is supposed to be equal to nnz, "
@@ -266,32 +266,32 @@ bool IMRT::parallelMatCoalease(
     }
     std::vector<EigenIdxType> cumuNumCols(numMatrices, 0);
     for (int i=0; i<numMatrices-1; i++) {
-        cumuNumCols[i + 1] = cumuNumCols[i] + OARMatrices[i].getCols();
+        cumuNumCols[i + 1] = cumuNumCols[i] + VOIMatrices[i].getCols();
     }
 
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
-        const MatCSR_Eigen& localOARMat = OARMatrices[i];
-        const EigenIdxType* localOffsets = localOARMat.getOffset();
-        const EigenIdxType* localColumns = localOARMat.getIndices();
-        const float* localValues = localOARMat.getValues();
+        const MatCSR_Eigen& localVOIMat = VOIMatrices[i];
+        const EigenIdxType* localOffsets = localVOIMat.getOffset();
+        const EigenIdxType* localColumns = localVOIMat.getIndices();
+        const float* localValues = localVOIMat.getValues();
         size_t column_offset = cumuNumCols[i];
-        for (int j=0; j<OARmat_numRows; j++) {
+        for (int j=0; j<VOImat_numRows; j++) {
             size_t nnzThisRow = localOffsets[j+1] - localOffsets[j];
             size_t startingIndex = offsets_copy[i][j];
             for (size_t k=0; k<nnzThisRow; k++) {
-                m_values_OARmat[startingIndex + k] = localValues[localOffsets[j] + k];
-                m_columns_OARmat[startingIndex + k] = column_offset
+                m_values_VOImat[startingIndex + k] = localValues[localOffsets[j] + k];
+                m_columns_VOImat[startingIndex + k] = column_offset
                     + localColumns[localOffsets[j] + k];
             }
         }
     }
-    OARmat.customInit(OARmat_numRows, OARmat_numCols, nnzTotal_matT,
-        m_offsets_OARmat, m_columns_OARmat, m_values_OARmat);
+    VOImat.customInit(VOImat_numRows, VOImat_numCols, nnzTotal_matT,
+        m_offsets_VOImat, m_columns_VOImat, m_values_VOImat);
     #if slicingTiming
         auto time2 = std::chrono::high_resolution_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(time2 - time1);
-        std::cout << "OARmat initialization time elapsed: " << duration.count() * 0.001f
+        std::cout << "VOImat initialization time elapsed: " << duration.count() * 0.001f
             << " [s]" << std::endl;
     #endif
     return 0;

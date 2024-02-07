@@ -7,6 +7,7 @@
 #include "IMRTDoseMat.cuh"
 #include "IMRTDoseMatEns.cuh"
 #include "IMRTDoseMatEigen.cuh"
+#include "IMRTOptimize.cuh"
 #include "IMRTDebug.cuh"
 
 namespace fs = boost::filesystem;
@@ -16,18 +17,15 @@ int main(int argc, char** argv) {
     if (IMRT::argparse(argc, argv))
         return 0;
 
+    IMRT::assignmentTest();
+    return 0;
+
     int mode = IMRT::getarg<int>("mode");
     int deviceIdx = IMRT::getarg<int>("deviceIdx");
     cudaSetDevice(deviceIdx);
 
     if (fd::showDeviceProperties(deviceIdx)) {
         std::cerr << "Cannot show device properties." << std::endl;
-        return 1;
-    }
-
-    IMRT::Params params;
-    if (IMRT::ParamsInit(params)) {
-        std::cerr << "Paramsters initialization error." << std::endl;
         return 1;
     }
 
@@ -82,15 +80,32 @@ int main(int argc, char** argv) {
         return 0; // ignore mode 1 at this time.
     }
 
-    IMRT::MatCSR64 SpOARmat, SpOARmatT;
+    IMRT::Params params;
+    IMRT::Weights_h weights_h;
+    IMRT::Weights_d weights_d;
+    IMRT::MatCSR64 SpVOImat, SpVOImatT;
     IMRT::MatCSR64 SpFluenceGrad, SpFluenceGradT;
     if (mode == 2) {
+        if (IMRT::ParamsInit(params)) {
+            std::cerr << "Paramsters initialization error." << std::endl;
+            return 1;
+        }
+
         fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
         doseMatFolder /= std::string("doseMatFolder");
-        IMRT::OARFiltering(doseMatFolder.string(), structs, SpOARmat, SpOARmatT);
+        IMRT::OARFiltering(doseMatFolder.string(), structs, SpVOImat,
+            SpVOImatT, weights_h, weights_d);
 
         int fluenceDim = IMRT::getarg<int>("fluenceDim");
         fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
-        IMRT::fluenceGradInit(SpFluenceGrad, SpFluenceGradT, fluenceMapPath.string(), fluenceDim);
+        std::vector<uint8_t> fluenceArray;
+        IMRT::fluenceGradInit(SpFluenceGrad, SpFluenceGradT, fluenceArray,
+            fluenceMapPath.string(), fluenceDim);
+
+        if (IMRT::BOO_IMRT_L2OneHalf_cpu_QL(SpVOImat, SpVOImatT, SpFluenceGrad,
+                SpFluenceGradT, weights_d, params, fluenceArray)) {
+            std::cerr << "Optimization error." << std::endl;
+            return 1;
+        }
     }
 }

@@ -105,15 +105,18 @@ namespace IMRT {
     bool MatOARSlicing(const MatCSR_Eigen& matrixT, MatCSR_Eigen& A,
         MatCSR_Eigen& AT, const std::vector<StructInfo>& structs);
 
+    class Weights_h; class Weights_d;
     bool OARFiltering(const std::string& resultFolder,
         const std::vector<StructInfo>& structs,
-        MatCSR64& SpOARmat, MatCSR64& SpOARmatT);
+        MatCSR64& SpVOImat, MatCSR64& SpVOImatT,
+        Weights_h& weights, Weights_d& weights_d);
 
     bool fluenceGradInit(MatCSR64& SpFluenceGrad, MatCSR64& SpFluenceGradT,
-        const std::string& fluenceMapPath, int fluenceDim);
+        std::vector<uint8_t>& fluenceArray, const std::string& fluenceMapPath,
+        int fluenceDim);
 
     bool getStructFilter(MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
-        const std::vector<StructInfo>& structs);
+        const std::vector<StructInfo>& structs, Weights_h& weights);
     
     // size in bytes
     bool readBlockParallel(const std::string& filename, void** pointer, EigenIdxType* size);
@@ -138,6 +141,7 @@ namespace IMRT {
 
     bool test_KroneckerProduct();
     bool test_filterConstruction();
+    bool testWeights(const Weights_h& weights_h);
 }
 
 IMRT::MatCSR_Eigen operator*(const IMRT::MatCSR_Eigen& a, const IMRT::MatCSR_Eigen& b);

@@ -606,6 +606,28 @@ def BeamDoseView():
         print("Beam {} done!".format(i))
 
 
+def countNumBeamlets():
+    """
+    This function calculates the total number of beamlets
+    """
+    file = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize/doseMatFolder/numRowsPerMat.bin"
+    numRowsPerMat_array = np.fromfile(file, dtype=np.uint64)
+    totalBeamlets = np.sum(numRowsPerMat_array)
+    print("The total number of matrices: {}".format(numRowsPerMat_array.size))
+    print("The total number of beamlets: {}".format(totalBeamlets))
+
+    # another source
+    fluenceMapFile = "/data/qifan/FastDoseWorkplace/BOOval/LUNG" \
+        "/optimize/doseMatFolder/fluenceMap.bin"
+    fluenceDim = 20
+    numPixelsPerBeam = fluenceDim * fluenceDim
+    fluenceArray = np.fromfile(fluenceMapFile, dtype=np.uint8)
+    assert fluenceArray.size % numPixelsPerBeam == 0, "The fluence array size is supposed " \
+        "to be a multiple of the number of pixels per beam"
+    sumFluence = np.sum(fluenceArray > 0)
+    print("The total number of active beamlets: {}".format(sumFluence))
+
+
 if __name__ == '__main__':
     # examineMasks()
     # readMasks()
@@ -619,4 +641,5 @@ if __name__ == '__main__':
     # viewPreSampling()
     # viewPVCSDose()
     # viewBEVDose()
-    BeamDoseView()
+    # BeamDoseView()
+    countNumBeamlets()
