@@ -4,6 +4,7 @@ file(GLOB IMRTHeaders ./include/*.cuh ./include/*.h)
 add_executable(IMRT main.cu ${IMRTSources} ${IMRTHeaders})
 target_link_libraries(IMRT PRIVATE FastDose)
 target_link_libraries(IMRT PRIVATE cusparse)
+target_link_libraries(IMRT PRIVATE cublas)
 target_include_directories(IMRT PRIVATE ./include)
 
 find_package(CUDA REQUIRED)

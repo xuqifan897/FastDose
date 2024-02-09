@@ -17,9 +17,6 @@ int main(int argc, char** argv) {
     if (IMRT::argparse(argc, argv))
         return 0;
 
-    IMRT::assignmentTest();
-    return 0;
-
     int mode = IMRT::getarg<int>("mode");
     int deviceIdx = IMRT::getarg<int>("deviceIdx");
     cudaSetDevice(deviceIdx);

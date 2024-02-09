@@ -5,6 +5,7 @@
 #include "IMRTDoseMat.cuh"
 #include "IMRTArgs.h"
 #include "IMRTDoseMatEigen.cuh"
+#include "IMRTOptimize.cuh"
 
 namespace fs = boost::filesystem;
 namespace fd = fastdose;
@@ -765,5 +766,106 @@ bool IMRT::test_SpMatOAR(const MatCSR64& SpOARmat, const MatCSR64& SpOARmatT,
     checkCudaErrors(cudaFree(d_result_data));
     checkCusparse(cusparseDestroyDnVec(d_weight_vec));
     checkCudaErrors(cudaFree(d_weight_data));
+    return 0;
+}
+
+
+bool IMRT::test_cusparseSlicing() {
+    // firstly, construct a sparse matrix
+    // 0  0  1  2
+    // 1  0  0  1
+    // 0  0  1  0
+    // 2  0  0  0
+
+    std::vector<size_t> offsets_h {0, 2, 4, 5, 6};
+    std::vector<size_t> columns_h {2, 3, 0, 3, 2, 0};
+    std::vector<float> values_h {1.0f, 2.0f, 1.0f, 1.0f, 1.0f, 2.0f};
+
+    // construct an Eigen matrix for sanity check
+    MatCSR_Eigen mat_h;
+    EigenIdxType* mat_h_offsets = (EigenIdxType*)malloc(offsets_h.size()*sizeof(EigenIdxType));
+    EigenIdxType* mat_h_columns = new EigenIdxType[columns_h.size()];
+    float* mat_h_values = new float[values_h.size()];
+    std::copy(offsets_h.begin(), offsets_h.end(), mat_h_offsets);
+    std::copy(columns_h.begin(), columns_h.end(), mat_h_columns);
+    std::copy(values_h.begin(), values_h.end(), mat_h_values);
+    mat_h.customInit(4, 4, 6, mat_h_offsets, mat_h_columns, mat_h_values);
+    std::cout << mat_h << std::endl;
+
+    size_t* offsets_d = nullptr;
+    size_t* columns_d = nullptr;
+    float* values_d = nullptr;
+    
+    // construct a slicing
+    MatCSR64 mat_slicing;
+    checkCudaErrors(cudaMalloc((void**)&offsets_d, 3*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&columns_d, 6*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&values_d, 6*sizeof(float)));
+    checkCudaErrors(cudaMemcpy(offsets_d, &offsets_h[2],
+        3*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(columns_d, columns_h.data(),
+        columns_h.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(values_d, values_h.data(),
+        values_h.size()*sizeof(float), cudaMemcpyHostToDevice));
+    mat_slicing.numRows = 2;
+    mat_slicing.numCols = 4;
+    mat_slicing.nnz = 2;
+    mat_slicing.d_csr_offsets = offsets_d;
+    mat_slicing.d_csr_columns = columns_d;
+    mat_slicing.d_csr_values = values_d;
+    checkCusparse(cusparseCreateCsr(
+        &mat_slicing.matA, mat_slicing.numRows, mat_slicing.numCols, mat_slicing.nnz,
+        mat_slicing.d_csr_offsets, mat_slicing.d_csr_columns, mat_slicing.d_csr_values,
+        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+
+    // construct dense vector
+    cusparseDnVecDescr_t input;
+    float* input_data = nullptr;
+    std::vector<float> input_data_h(mat_slicing.numCols, 1.0f);
+    checkCudaErrors(cudaMalloc((void**)&input_data, mat_slicing.numCols*sizeof(float)));
+    checkCudaErrors(cudaMemcpy(input_data, input_data_h.data(),
+        input_data_h.size()*sizeof(float), cudaMemcpyHostToDevice));
+    checkCusparse(cusparseCreateDnVec(&input, input_data_h.size(), input_data, CUDA_R_32F));
+
+    cusparseDnVecDescr_t output;
+    float* output_data = nullptr;
+    std::vector<float> output_data_h(mat_slicing.numRows, 1.0f);
+    std::vector<float> output_data_ref(mat_slicing.numRows, 1.0f);
+    checkCudaErrors(cudaMalloc((void**)&output_data, mat_slicing.numRows*sizeof(float)));
+    checkCusparse(cusparseCreateDnVec(&output, mat_slicing.numRows, output_data, CUDA_R_32F));
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    size_t bufferSize = 0;
+    cusparseHandle_t handle = nullptr;
+    checkCusparse(cusparseCreate(&handle));
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, mat_slicing.matA, input, &beta, output,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
+    checkCudaErrors(cudaMalloc((void**)&mat_slicing.d_buffer_spmv, bufferSize));
+
+    int numCases = 100;
+    for (int i=0; i<numCases; i++) {
+        for (int j=0; j<input_data_h.size(); j++) {
+            input_data_h[j] = std::rand() / RAND_MAX;
+        }
+        checkCudaErrors(cudaMemcpy(input_data, input_data_h.data(),
+            input_data_h.size()*sizeof(float), cudaMemcpyHostToDevice));
+        checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+            &alpha, mat_slicing.matA, input, &beta, output, CUDA_R_32F,
+            CUSPARSE_SPMV_ALG_DEFAULT, mat_slicing.d_buffer_spmv));
+        checkCudaErrors(cudaMemcpy(output_data_h.data(), output_data,
+            output_data_h.size()*sizeof(float), cudaMemcpyDeviceToHost));
+
+        output_data_ref[0] = input_data_h[2];
+        output_data_ref[1] = input_data_h[0] * 2;
+        if (abs(output_data_h[0] - output_data_ref[0]) > eps_fastdose
+            || abs(output_data_h[1] - output_data_ref[1]) > eps_fastdose) {
+            std::cerr << "result unexpected." << std::endl;
+            return 1;
+        }
+    }
+    std::cout << "Cusparse slicing test passed!" << std::endl;
     return 0;
 }
