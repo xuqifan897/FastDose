@@ -18,13 +18,18 @@ namespace IMRT {
         bool load(const std::vector<MatCSR_Eigen>& source);
         // assemble the reservior to a single matrix
         bool assemble_row_block(MatCSR64& target, const std::vector<uint8_t>& flags) const;
-        bool assemble_col_block(MatCSR64& target, const std::vector<uint8_t>& flags) const;
+        bool assemble_col_block(MatCSR64& target, const std::vector<MatCSR_Eigen>& reservior_h,
+            const std::vector<uint8_t>& flags) const;
         std::vector<MatCSR64> reservior;
     };
 
     __global__ void
     d_assembly_row_block(size_t* d_csr_offsets,
         size_t* cumu_row, size_t* cumu_nnz, size_t numMatrices);
+    __global__ void
+    d_assembly_col_block(size_t* d_csr_offsets, size_t* d_csr_columns, float* d_csr_values,
+        size_t** source_offsets, size_t** source_columns, float** source_values,
+        size_t* source_columns_offset, size_t numRows, size_t numMatrices);
 
     bool MatReservior_dev(
         const std::vector<MatCSR_Eigen>& VOIMatrices,

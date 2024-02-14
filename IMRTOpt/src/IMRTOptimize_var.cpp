@@ -1,6 +1,8 @@
 #include <fstream>
 #include <chrono>
+#include <omp.h>
 #include "IMRTDoseMatEigen.cuh"
+#include "IMRTOptimize_var.h"
 #include "IMRTArgs.h"
 
 
@@ -290,5 +292,47 @@ bool IMRT::diagBlock(MatCSR_Eigen& target, const std::vector<MatCSR_Eigen*>& sou
     }
     target.customInit(target_numRows, target_numCols, target_nnz,
         target_offsets, target_indices, target_values);
+    return 0;
+}
+
+
+bool IMRT::assemble_col_block_meta(
+    size_t& numRows, size_t& numCols, size_t& total_nnz, size_t& numMatrices,
+    std::vector<size_t>& cumuNnz, const std::vector<uint8_t>& flags,
+    const std::vector<MatCSR_Eigen>& reservior_h
+) {
+    numRows = reservior_h[0].getRows();
+    numCols = 0;
+    total_nnz = 0;
+    numMatrices = 0;
+    #pragma opm parallel for reduction(+:numCols, total_nnz, numMatrices)
+    for (int i=0; i<reservior_h.size(); i++) {
+        if (flags[i] == 0)
+            continue;
+        
+        const MatCSR_Eigen& current = reservior_h[i];
+        numCols += current.getCols();
+        total_nnz += current.getNnz();
+        numMatrices += 1;
+    }
+
+    cumuNnz.resize(numRows+1);
+    cumuNnz[0] = 0;
+    #pragma omp parallel for
+    for (size_t i=0; i<numRows; i++) {
+        size_t local_nnz = 0;
+        for (int j=0; j<reservior_h.size(); j++) {
+            if (flags[j] == 0)
+                continue;
+            
+            const MatCSR_Eigen& res = reservior_h[j];
+            const EigenIdxType* res_offsets = res.getOffset();
+            local_nnz += res_offsets[i+1] - res_offsets[i];
+        }
+        cumuNnz[i+1] = local_nnz;
+    }
+
+    for (size_t j=0; j<numRows; j++)
+        cumuNnz[j+1] += cumuNnz[j];
     return 0;
 }
