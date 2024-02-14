@@ -115,6 +115,24 @@ namespace IMRT {
         std::vector<uint8_t>& fluenceArray, const std::string& fluenceMapPath,
         int fluenceDim);
 
+    bool matFuseFunc(
+        std::vector<MatCSR_Eigen*>& VOIMatrices,
+        std::vector<MatCSR_Eigen*>& VOIMatricesT,
+        std::vector<MatCSR_Eigen*>& SpFluenceGrad,
+        std::vector<MatCSR_Eigen*>& SpFluenceGradT,
+        MatCSR_Eigen& VOIMat_Eigen,
+        MatCSR_Eigen& VOIMatT_Eigen,
+        MatCSR_Eigen& D_Eigen,
+        MatCSR_Eigen& DTrans_Eigen);
+
+    bool diagBlock(MatCSR_Eigen& target, const std::vector<MatCSR_Eigen*>& source);
+
+    bool fluenceGradInit(
+        std::vector<IMRT::MatCSR_Eigen>& SpFluenceGrad,
+        std::vector<IMRT::MatCSR_Eigen>& SpFluenceGradT,
+        std::vector<uint8_t>& fluenceArray,
+        const std::string& fluenceMapPath);
+
     bool getStructFilter(MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
         const std::vector<StructInfo>& structs, Weights_h& weights);
     

@@ -135,6 +135,7 @@ namespace IMRT {
     };
 
     void arrayInit(array_1d<float>& arr, size_t size);
+    void arrayRand01(array_1d<float>& arr);
 
     __global__ void
     d_calc_prox1(float* prox1_data, float* Ax_data, const float* minDoseTargetData, size_t size);

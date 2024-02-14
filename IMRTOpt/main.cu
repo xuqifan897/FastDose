@@ -1,3 +1,4 @@
+#include <iomanip>
 #include <boost/filesystem.hpp>
 #include "cuda_runtime.h"
 #include "fastdose.cuh"
@@ -8,6 +9,7 @@
 #include "IMRTDoseMatEns.cuh"
 #include "IMRTDoseMatEigen.cuh"
 #include "IMRTOptimize.cuh"
+#include "IMRTOptimize_var.cuh"
 #include "IMRTDebug.cuh"
 
 namespace fs = boost::filesystem;
@@ -79,30 +81,36 @@ int main(int argc, char** argv) {
 
     IMRT::Params params;
     IMRT::Weights_h weights_h;
-    IMRT::Weights_d weights_d;
-    IMRT::MatCSR64 SpVOImat, SpVOImatT;
-    IMRT::MatCSR64 SpFluenceGrad, SpFluenceGradT;
-    if (mode == 2) {
-        if (IMRT::ParamsInit(params)) {
-            std::cerr << "Paramsters initialization error." << std::endl;
-            return 1;
-        }
+    std::vector<IMRT::MatCSR_Eigen> VOIMatrices, VOIMatricesT;
+    std::vector<IMRT::MatCSR_Eigen> SpFluenceGrad, SpFluenceGradT;
+    std::vector<uint8_t> fluenceArray;
 
-        fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-        doseMatFolder /= std::string("doseMatFolder");
-        IMRT::OARFiltering(doseMatFolder.string(), structs, SpVOImat,
-            SpVOImatT, weights_h, weights_d);
+    if (IMRT::ParamsInit(params)) {
+        std::cerr << "Paramsters initialization error." << std::endl;
+        return 1;
+    }
 
-        int fluenceDim = IMRT::getarg<int>("fluenceDim");
-        fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
-        std::vector<uint8_t> fluenceArray;
-        IMRT::fluenceGradInit(SpFluenceGrad, SpFluenceGradT, fluenceArray,
-            fluenceMapPath.string(), fluenceDim);
+    fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
+    doseMatFolder /= std::string("doseMatFolder");
+    const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
+    int SpMatT_ColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
+    
+    if (IMRT::OARFiltering(doseMatFolder.string(), structs,
+        VOIMatrices, VOIMatricesT, weights_h)) {
+        std::cerr << "VOI matrices and their transpose initialization error." << std::endl;
+        return 1;
+    }
 
-        if (IMRT::BOO_IMRT_L2OneHalf_cpu_QL(SpVOImat, SpVOImatT, SpFluenceGrad,
-                SpFluenceGradT, weights_d, params, fluenceArray)) {
-            std::cerr << "Optimization error." << std::endl;
-            return 1;
-        }
+    fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
+    if (IMRT::fluenceGradInit(SpFluenceGrad, SpFluenceGradT,
+        fluenceArray, fluenceMapPath.string())) {
+        std::cerr << "Fluence gradient matrices and their transpose "
+            "initialiation error." << std::endl;
+        return 1;
+    }
+
+    if (IMRT::MatReservior_dev_col(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
+        std::cerr << "Function IMRT::MatReservior_dev_col error." << std::endl;
+        return 1;
     }
 }

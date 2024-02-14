@@ -75,7 +75,7 @@ IMRT::eval_g::~eval_g() {
     if (this->stream5)
         checkCudaErrors(cudaStreamDestroy(this->stream5));
     if (this->cublasHandle)
-        checkCublas(cublasDestroy(this->cublasHandle));
+        cublasDestroy(this->cublasHandle);
 }
 
 
@@ -245,4 +245,14 @@ bool IMRT::assignmentTest(){
         std::cout << dest_data_h[i] << " ";
     std::cout << std::endl;
     return 0;
+}
+
+
+void IMRT::arrayRand01(array_1d<float>& arr) {
+    std::vector<float> arr_h(arr.size, 0.0f);
+    for (size_t i=0; i<arr_h.size(); i++)
+        arr_h[i] = (float)std::rand() / RAND_MAX;
+
+    checkCudaErrors(cudaMemcpy(arr.data, arr_h.data(),
+        arr_h.size()*sizeof(float), cudaMemcpyHostToDevice));
 }
