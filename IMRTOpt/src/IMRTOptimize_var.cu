@@ -566,3 +566,311 @@ bool IMRT::MatReservior_dev_col(
 
     return 0;
 }
+
+
+bool IMRT::MatReservior::assemble_diag(
+    MatCSR64& target, const std::vector<uint8_t>& flags) const {
+    // firstly, check if the target is empty
+    if (target.matA != nullptr || target.d_csr_offsets != nullptr ||
+        target.d_csr_columns != nullptr || target.d_csr_values != nullptr ||
+        target.d_buffer_spmv != nullptr) {
+        std::cerr << "The target is not an empty matrix." << std::endl;
+        return 1;
+    }
+    if (flags.size() != this->reservior.size()) {
+        std::cerr << "The size of the input vector flags should be the same "
+            "as this->reservior." << std::endl;
+        return 1;
+    }
+
+    size_t numRows = 0;
+    size_t numCols = 0;
+    size_t numNnz = 0;
+    size_t numMatrices = 0;
+    std::vector<size_t*> source_offsets_h;
+    std::vector<size_t*> source_columns_h;
+    std::vector<float*> source_values_h;
+    source_offsets_h.reserve(this->reservior.size());
+    source_columns_h.reserve(this->reservior.size());
+    source_values_h.reserve(this->reservior.size());
+
+    std::vector<size_t> row_offsets;
+    std::vector<size_t> col_offsets;
+    std::vector<size_t> nnz_offsets;
+    row_offsets.reserve(this->reservior.size());
+    col_offsets.reserve(this->reservior.size());
+    nnz_offsets.reserve(this->reservior.size());
+    row_offsets.push_back(0);
+    col_offsets.push_back(0);
+    nnz_offsets.push_back(0);
+    for (int i=0; i<this->reservior.size(); i++) {
+        if (flags[i] == 0)
+            continue;
+        const MatCSR64& res = this->reservior[i];
+        source_offsets_h.push_back(res.d_csr_offsets);
+        source_columns_h.push_back(res.d_csr_columns);
+        source_values_h.push_back(res.d_csr_values);
+
+        numRows += res.numRows;
+        numCols += res.numCols;
+        numNnz += res.nnz;
+        numMatrices ++;
+
+        row_offsets.push_back(numRows);
+        col_offsets.push_back(numCols);
+        nnz_offsets.push_back(numNnz);
+    }
+
+    #if false
+        // for debug purposes
+        for (size_t i=0; i<numMatrices+1; i++) {
+            std::cout << "idx: " << i << ", (row_offsets, col_offsets, nnz_offsets): ("
+                << row_offsets[i] << ", " << col_offsets[i] << ", " << nnz_offsets[i] << ")"
+                << std::endl;
+        }
+    #endif
+
+    target.numRows = numRows;
+    target.numCols = numCols;
+    target.nnz = numNnz;
+    checkCudaErrors(cudaMalloc((void**)&target.d_csr_offsets, (numRows+1)*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&target.d_csr_columns, numNnz*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&target.d_csr_values, numNnz*sizeof(float)));
+
+    size_t** source_offsets = nullptr;
+    size_t** source_columns = nullptr;
+    float** source_values = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&source_offsets, numMatrices*sizeof(size_t*)));
+    checkCudaErrors(cudaMalloc((void**)&source_columns, numMatrices*sizeof(size_t*)));
+    checkCudaErrors(cudaMalloc((void**)&source_values, numMatrices*sizeof(float*)));
+    checkCudaErrors(cudaMemcpy(source_offsets, source_offsets_h.data(),
+        numMatrices*sizeof(size_t*), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(source_columns, source_columns_h.data(),
+        numMatrices*sizeof(size_t*), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(source_values, source_values_h.data(),
+        numMatrices*sizeof(float*), cudaMemcpyHostToDevice));
+
+    size_t* rowOff = nullptr;
+    size_t* colOff = nullptr;
+    size_t* nnzOff = nullptr;
+    checkCudaErrors(cudaMalloc((void**)&rowOff, (numMatrices+1)*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&colOff, (numMatrices+1)*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&nnzOff, (numMatrices+1)*sizeof(size_t)));
+    checkCudaErrors(cudaMemcpy(rowOff, row_offsets.data(),
+        (numMatrices+1)*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(colOff, col_offsets.data(),
+        (numMatrices+1)*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(nnzOff, nnz_offsets.data(),
+        (numMatrices+1)*sizeof(size_t), cudaMemcpyHostToDevice));
+    
+    dim3 blockSize(64, 1, 1);
+    dim3 gridSize(1, 1, 1);
+    gridSize.x = (numMatrices + blockSize.x - 1) / blockSize.x;
+
+    #if false
+        // for debug purposes
+        std::cout << "numMatrices: " << numMatrices << ", gridSize: "
+            << gridSize << ", blockSize: " << blockSize << std::endl;
+        for (int i=0; i<numMatrices + 1; i++) {
+            const MatCSR64& res = this->reservior[i];
+            std::cout << "Matrix: " << i << " (rows, cols, nnz): (" << res.numRows
+                << ", " << res.numCols << ", " << res.nnz << ")\n";
+        }
+        std::cout << std::endl;
+    #endif
+
+    d_assemble_diag<<<gridSize, blockSize>>>(
+        target.d_csr_offsets, target.d_csr_columns, target.d_csr_values,
+        source_offsets, source_columns, source_values,
+        rowOff, colOff, nnzOff, numMatrices);
+    checkCudaErrors(cudaDeviceSynchronize());
+    checkCusparse(cusparseCreateCsr(
+        &target.matA, target.numRows, target.numCols, target.nnz,
+        target.d_csr_offsets, target.d_csr_columns, target.d_csr_values,
+        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+
+    // clean up
+    checkCudaErrors(cudaFree(source_offsets));
+    checkCudaErrors(cudaFree(source_columns));
+    checkCudaErrors(cudaFree(source_values));
+    checkCudaErrors(cudaFree(rowOff));
+    checkCudaErrors(cudaFree(colOff));
+    checkCudaErrors(cudaFree(nnzOff));
+    return 0;
+}
+
+
+
+__global__ void
+IMRT::d_assemble_diag(size_t* d_csr_offsets, size_t* d_csr_columns, float* d_csr_values,
+    size_t** source_offsets, size_t** source_columns, float** source_values,
+    size_t* rowOff, size_t* colOff, size_t* nnzOff, size_t numMatrices) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+    if (idx >= numMatrices)
+        return;
+    
+    size_t row_begin = rowOff[idx];
+    size_t row_end = rowOff[idx+1];
+    size_t col_begin = colOff[idx];
+    // size_t col_end = colOff[idx+1];
+    size_t nnz_begin = nnzOff[idx];
+    size_t nnz_end = nnzOff[idx+1];
+
+    size_t num_rows = row_end - row_begin;
+    size_t num_nnz = nnz_end - nnz_begin;
+    
+    size_t* current_source_offsets = source_offsets[idx];
+    size_t* current_source_columns = source_columns[idx];
+    float* current_source_values = source_values[idx];
+
+    for (size_t i=0; i<num_rows; i++) {
+        d_csr_offsets[row_begin+i+1] = current_source_offsets[i+1] + nnz_begin;
+    }
+
+    for (size_t i=0; i<num_nnz; i++) {
+        size_t dst_idx = nnz_begin + i;
+        d_csr_columns[dst_idx] = current_source_columns[i] + col_begin;
+        d_csr_values[dst_idx] = current_source_values[i];
+    }
+}
+
+
+bool IMRT::MatReservior_dev_diag(
+    const std::vector<MatCSR_Eigen>& VOIMatrices,
+    const std::vector<MatCSR_Eigen>& VOIMatricesT,
+    const std::vector<MatCSR_Eigen>& SpFluenceGrad,
+    const std::vector<MatCSR_Eigen>& SpFluenceGradT) {
+    IMRT::MatReservior VOIReservior, VOIReserviorT, FGReservior, FGReserviorT;
+    #if true
+    // estimate size
+        size_t totalSize = IMRT::sizeEstimate(VOIMatrices, VOIMatricesT,
+            SpFluenceGrad, SpFluenceGradT);
+        std::cout << "Total size: " << (float)totalSize / (1<<30) << " G" << std::endl;
+    #endif
+    #if slicingTiming
+        auto time0 = std::chrono::high_resolution_clock::now();
+    #endif
+    if (VOIReservior.load(VOIMatrices) ||
+        VOIReserviorT.load(VOIMatricesT) ||
+        FGReservior.load(SpFluenceGrad) ||
+        FGReserviorT.load(SpFluenceGradT)) {
+        std::cerr << "Loading data from CPU to GPU error." << std::endl;
+    }
+    #if slicingTiming
+        auto time1 = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(time1 - time0);
+        std::cout << std::setprecision(4) << "Loading data from CPU to GPU time elapsed: " 
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+    std::vector<uint8_t> flags(VOIReserviorT.reservior.size(), 1);
+    MatCSR64 D;
+    if (FGReservior.assemble_diag(D, flags)) {
+        return 1;
+    }
+    #if slicingTiming
+        auto time2 = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(time2 - time1);
+        std::cout << "Assembly_diag time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+
+    #if false
+        std::cout << "\nMatrx D Benchmarking starts..." << std::endl;
+        const MatCSR_Eigen& first_grad = SpFluenceGrad[0];
+        const EigenIdxType* first_grad_offsets = first_grad.getOffset();
+        const EigenIdxType* first_grad_columns = first_grad.getIndices();
+        const float* first_grad_values = first_grad.getValues();
+
+        size_t first_grad_numRows = first_grad.getRows();
+        size_t first_grad_numCols = first_grad.getCols();
+        size_t first_grad_nnz = first_grad.getNnz();
+
+        std::vector<size_t> sliceOffsets(first_grad_numRows+1);
+        std::vector<size_t> sliceColumns(first_grad_nnz);
+        std::vector<float> sliceValues(first_grad_nnz);
+        checkCudaErrors(cudaMemcpy(sliceOffsets.data(), D.d_csr_offsets,
+            sliceOffsets.size()*sizeof(size_t), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(sliceColumns.data(), D.d_csr_columns,
+            sliceColumns.size()*sizeof(size_t), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(sliceValues.data(), D.d_csr_values,
+            sliceValues.size()*sizeof(float), cudaMemcpyDeviceToHost));
+
+        for (size_t i=0; i<first_grad_numRows; i++) {
+            if (first_grad_offsets[i] != sliceOffsets[i]) {
+                std::cerr << "Offsets unmatch at i=" << i << ", sliceOffsets[i]=="
+                    << sliceOffsets[i] << ", first_grad_offsets[i]=="
+                    << first_grad_offsets[i] << std::endl;
+                return 1;
+            }
+        }
+        for (size_t i=0; i<first_grad_nnz; i++) {
+            if(first_grad_columns[i] != sliceColumns[i] ||
+                std::abs(first_grad_values[i] - sliceValues[i]) > 1e-4f) {
+                std::cerr << "Element inconsistency at i==" << i << " Device: (" <<
+                    sliceColumns[i] << ", " << sliceValues[i] << "), Reference: (" <<
+                    first_grad_columns[i] << ", " << first_grad_values[i] << ")" << std::endl;
+                return 1;
+            }
+        }
+        std::cout << "First block comparison success!" << std::endl;
+    #endif
+
+
+    #if true
+        // verify against MatCSR_Eigen
+        std::cout << "\nMatrx D Benchmarking starts..." << std::endl;
+        // for comparision
+        MatCSR_Eigen VOIMat_Eigen;
+        MatCSR_Eigen VOIMatT_Eigen;
+        MatCSR_Eigen D_Eigen;
+        MatCSR_Eigen DTrans_Eigen;
+        std::vector<MatCSR_Eigen*> VOIMatrice_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<MatCSR_Eigen*> VOIMatriceT_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<MatCSR_Eigen*> SpFluenceGrad_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<MatCSR_Eigen*> SpFluenceGradT_ptr(VOIMatricesT.size(), nullptr);
+        for (int i=0; i<VOIMatricesT.size(); i++) {
+            VOIMatrice_ptr[i] = (MatCSR_Eigen*)&VOIMatrices[i];
+            VOIMatriceT_ptr[i] = (MatCSR_Eigen*)&VOIMatricesT[i];
+            SpFluenceGrad_ptr[i] = (MatCSR_Eigen*)&SpFluenceGrad[i];
+            SpFluenceGradT_ptr[i] = (MatCSR_Eigen*)&SpFluenceGradT[i];
+        }
+        matFuseFunc(VOIMatrice_ptr, VOIMatriceT_ptr, SpFluenceGrad_ptr, SpFluenceGradT_ptr,
+            VOIMat_Eigen, VOIMatT_Eigen, D_Eigen, DTrans_Eigen);
+
+        std::vector<size_t> D_offsets(D.numRows + 1);
+        std::vector<size_t> D_columns(D.nnz);
+        std::vector<float> D_values(D.nnz);
+        checkCudaErrors(cudaMemcpy(D_offsets.data(), D.d_csr_offsets,
+            D_offsets.size()*sizeof(size_t), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(D_columns.data(), D.d_csr_columns,
+            D_columns.size()*sizeof(size_t), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(D_values.data(), D.d_csr_values,
+            D_values.size()*sizeof(float), cudaMemcpyDeviceToHost));
+
+        EigenIdxType* ref_offsets = *D_Eigen.getOffset();
+        const EigenIdxType* ref_columns = D_Eigen.getIndices();
+        const float* ref_values = D_Eigen.getValues();
+
+        for (size_t i=0; i<D_offsets.size(); i++) {
+            if (D_offsets[i] != ref_offsets[i]) {
+                std::cerr << "Offsets unmatch at i=" << i << ", D_offsets[i]=="
+                    << D_offsets[i] << ", ref_offsets[i]==" << ref_offsets[i] << std::endl;
+                return 1;
+            }
+        }
+        for (size_t i=0; i<D_columns.size(); i++) {
+            if (D_columns[i] != ref_columns[i] ||
+                std::abs(D_values[i] - ref_values[i]) > 1e-4f) {
+                std::cerr << "Element unmatch at i=" << i << " test: (" << D_columns[i]
+                    << ", " << D_values[i] << "), reference: (" << ref_columns[i]
+                    << ", " << ref_values[i] << ")" << std::endl;
+                return 1;
+            }
+        }
+        std::cout << "MatReservior_dev_diag success!" << std::endl;
+    #endif
+
+    return 0;
+}

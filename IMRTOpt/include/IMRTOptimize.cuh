@@ -62,6 +62,8 @@ namespace IMRT {
         MatCSR64& D, MatCSR64& DTrans, const Weights_d& weights_d,
         const Params& params, const std::vector<uint8_t>& fluenceArray);
 
+    // bool BOO_IMRT_L2OneHalf_cpu_QL(const std::vector<MatCSR_Eigen>&)
+
     template<class T>
     class array_1d {
     public:
@@ -82,14 +84,6 @@ namespace IMRT {
     };
     template class array_1d<float>;
     template class array_1d<uint8_t>;
-
-    bool beamWeightsInit(
-        const Params& params, const Weights_d& weights_d,
-        MatCSR64& A, MatCSR64& ATrans, MatCSR64& D, MatCSR64& DTrans,
-        const std::vector<uint8_t>& fluenceArray,
-        array_1d<float>& beamWeights, array_1d<uint8_t>& BeamletLog,
-        array_1d<float>& input_d, array_1d<float>& output_d
-    );
 
     class eval_g {
     public:

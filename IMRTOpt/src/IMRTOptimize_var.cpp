@@ -59,7 +59,7 @@ bool IMRT::fluenceGradInit(
         Eigen::VectorXf Dxsum2 = Dx_local.cwiseAbs() * sumVec;
         std::vector<uint8_t> Dx_filter_array(Dxsum1.size());
         for (size_t j=0; j<Dxsum1.size(); j++)
-            Dx_filter_array[j] = (std::abs(Dxsum1[i] < 1e-4f)) && (Dxsum2[i] > 1e-4f);
+            Dx_filter_array[j] = (std::abs(Dxsum1[j]) < 1e-4f) && (Dxsum2[j] > 1e-4f);
         MatCSR_Eigen Dx_filter;
         filterConstruction(Dx_filter, Dx_filter_array);
         Dx_local = Dx_filter.transpose() * Dx_local;
@@ -68,7 +68,7 @@ bool IMRT::fluenceGradInit(
         Eigen::VectorXf Dysum2 = Dy_local.cwiseAbs() * sumVec;
         std::vector<uint8_t> Dy_filter_array(Dysum1.size());
         for (size_t j=0; j<Dysum1.size(); j++)
-            Dy_filter_array[j] = (std::abs(Dysum1[i]) < 1e-4f) && (Dysum2[i] > 1e-4f);
+            Dy_filter_array[j] = (std::abs(Dysum1[j]) < 1e-4f) && (Dysum2[j] > 1e-4f);
         MatCSR_Eigen Dy_filter;
         filterConstruction(Dy_filter, Dy_filter_array);
         Dy_local = Dy_filter.transpose() * Dy_local;
@@ -105,6 +105,19 @@ bool IMRT::fluenceGradInit(
         
         SpFluenceGrad[i] = Dxy_concat;
         SpFluenceGradT[i] = Dxy_concat.transpose();
+
+        #if false
+            #pragma omp critical
+            {
+            // for debug purposes
+            std::cout << "beam " << i << ":\nDx_local (row, col, nnz) == (" << Dx_local.getRows()
+                << ", " << Dx_local.getCols() << ", " << Dx_local.getNnz() << ")\n"
+                << "Dy_local (row, col, nnz) == (" << Dy_local.getRows() << ", "
+                << Dy_local.getCols() << ", " << Dy_local.getNnz() << ")\n" 
+                << "Dxy_concat (row, col, nnz) == (" << Dxy_concat.getRows()
+                << ", " << Dxy_concat.getCols() << ", " << Dxy_concat.getNnz() << ")" << std::endl;
+            }
+        #endif
     }
 
     #if slicingTiming

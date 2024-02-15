@@ -109,8 +109,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // if (IMRT::MatReservior_dev_diag(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
+    //     std::cerr << "Function IMRT::MatReservior_dev_diag error." << std::endl;
+    //     return 1;
+    // }
+
+    // if (IMRT::MatReservior_dev(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
+    //     std::cerr << "Function IMRT::MatReservior_dev_diag error." << std::endl;
+    //     return 1;
+    // }
+
     if (IMRT::MatReservior_dev_col(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
-        std::cerr << "Function IMRT::MatReservior_dev_col error." << std::endl;
+        std::cerr << "Function IMRT::MatReservior_dev_diag error." << std::endl;
         return 1;
     }
 }
