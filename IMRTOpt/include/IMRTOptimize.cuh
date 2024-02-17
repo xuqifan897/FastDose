@@ -4,6 +4,7 @@
 #include <cublas_v2.h>
 #include "IMRTInit.cuh"
 #include "IMRTDoseMat.cuh"
+#include "IMRTOptimize_var.cuh"
 
 #define checkCublas(err)                                                                          \
     do {                                                                                           \
@@ -32,19 +33,6 @@ namespace IMRT {
         int voxels_OAR;
     };
 
-    class Weights_d {
-    public:
-        bool fromHost(const Weights_h& source);
-        ~Weights_d();
-        float* maxDose = nullptr;
-        float* maxWeightsLong = nullptr;
-        float* minDoseTarget = nullptr;
-        float* minDoseTargetWeights = nullptr;
-        float* OARWeightsLong = nullptr;
-    
-        int voxels_PTV;
-        int voxels_OAR;
-    };
     bool caseInsensitiveStringCompare(char c1, char c2);
     bool containsCaseInsensitive(const std::string& data, const std::string& pattern);
     bool structComp(const std::tuple<StructInfo, bool, size_t>& a,
@@ -62,7 +50,14 @@ namespace IMRT {
         MatCSR64& D, MatCSR64& DTrans, const Weights_d& weights_d,
         const Params& params, const std::vector<uint8_t>& fluenceArray);
 
-    // bool BOO_IMRT_L2OneHalf_cpu_QL(const std::vector<MatCSR_Eigen>&)
+    bool BOO_IMRT_L2OneHalf_gpu_QL(
+        const std::vector<MatCSR_Eigen>& VOIMatrices,
+        const std::vector<MatCSR_Eigen>& VOIMatricesT,
+        const std::vector<MatCSR_Eigen>& SpFluenceGrad,
+        const std::vector<MatCSR_Eigen>& SpFluenceGradT,
+        const Weights_h& weights_h,
+        const Params& params,
+        const std::vector<uint8_t>& fluenceArray);
 
     template<class T>
     class array_1d {
@@ -77,6 +72,18 @@ namespace IMRT {
                 this->vec = nullptr;
             }
         }
+        bool resize(size_t new_size) {
+            if (new_size > size) {
+                std::cerr << "Only dimension reduction supported, "
+                    "expansion not supported." << std::endl;
+                return 1;
+            }
+            if (this->vec != nullptr)
+                checkCusparse(cusparseDestroyDnVec(this->vec));
+            checkCusparse(cusparseCreateDnVec(&this->vec, new_size, this->data, CUDA_R_32F));
+            this->size = new_size;
+            return 0;
+        }
         array_1d<T>& operator=(const array_1d<T>& other);
         T* data = nullptr;
         cusparseDnVecDescr_t vec = nullptr;
@@ -85,15 +92,31 @@ namespace IMRT {
     template class array_1d<float>;
     template class array_1d<uint8_t>;
 
+    class Weights_d {
+    public:
+        bool fromHost(const Weights_h& source);
+        array_1d<float> maxDose;
+        array_1d<float> maxWeightsLong;
+        array_1d<float> minDoseTarget;
+        array_1d<float> minDoseTargetWeights;
+        array_1d<float> OARWeightsLong;
+    
+        int voxels_PTV;
+        int voxels_OAR;
+    };
+
     class eval_g {
     public:
-        eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows);
+        eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows_max);
         ~eval_g();
+        // adapt to the changing dimension
+        void resize(size_t D_rows_current_);
         // assume the handle and the stream are bound
         float evaluate(const MatCSR64& A, const MatCSR64& D,
-            const array_1d<float>& x, float* maxDose, float gamma,
+            const array_1d<float>& x, float gamma,
             const cusparseHandle_t& handle,
             
+            float* maxDose,
             const float* minDoseTarget,
             const float* minDoseTargetWeights,
             const float* maxWeightsLong,
@@ -102,7 +125,8 @@ namespace IMRT {
     private:
         size_t PTV_voxels;
         size_t OAR_voxels;
-        size_t D_rows;
+        size_t D_rows_max;
+        size_t D_rows_current;
         float alpha;
         float beta;
 
@@ -146,6 +170,93 @@ namespace IMRT {
     __global__ void
     d_calcProx4Term4(float* sumProx4Term4Data, float* prox4Data,
         float* term4Data, size_t size);
+
+
+    class eval_grad {
+    public:
+        eval_grad(size_t ptv_voxels, size_t oar_voxels,
+            size_t numBeamlets_max_, size_t d_rows_max_);
+        ~eval_grad();
+        void resize(size_t numBeamlets_current_, size_t D_rows_current_);
+        float evaluate(const MatCSR64& A, const MatCSR64& ATrans,
+            const MatCSR64& D, const MatCSR64& DTrans,
+            const array_1d<float>& x, array_1d<float>& grad, float gamma,
+            const cusparseHandle_t& handle,
+            
+            float* maxDose,
+            const float* minDoseTarget,
+            const float* minDoseTargetWeights,
+            const float* maxWeightsLong,
+            const float* OARWeightsLong,
+            float eta);
+    private:
+        size_t PTV_voxels;
+        size_t OAR_voxels;
+        size_t numBeamlets_max;
+        size_t numBeamlets_current;
+        size_t D_rows_max;
+        size_t D_rows_current;
+        float alpha;
+        float beta;
+
+        cudaStream_t stream1 = nullptr;
+        cudaStream_t stream2 = nullptr;
+        cudaStream_t stream3 = nullptr;
+        cudaStream_t stream4 = nullptr;
+        cudaStream_t stream5 = nullptr;
+
+        array_1d<float> Ax;
+        array_1d<float> prox1;
+        array_1d<float> prox2;
+        array_1d<float> term3;
+        array_1d<float> term4;
+        array_1d<float> prox4;
+
+        array_1d<float> sumProx1;
+        array_1d<float> sumProx2;
+        array_1d<float> sumTerm3;
+        array_1d<float> sumProx4;
+        array_1d<float> sumProx4Term4;
+
+        array_1d<float> grad_term1_input;
+        array_1d<float> grad_term1_output;
+        array_1d<float> grad_term2_input;
+        array_1d<float> grad_term2_output;
+
+        cublasHandle_t cublasHandle = nullptr;
+    };
+
+    // performs c = alpha * a + beta * b;
+    __global__ void
+    d_linearComb(float* c, float alpha, float* a, float beta, float* b, size_t size);
+    __global__ void
+    d_calc_grad_term1_input(float* output,
+        size_t PTV_voxels, const float* minDoseTargetWeights, float* prox1Data,
+        size_t OAR_voxels, const float* OARWeightsLong, float* term3Data,
+        const float* maxWeightsLong, float* prox2Data);
+    __global__ void
+    d_calc_grad_term2_input(float* output, float* term4Data,
+        float* prox4Data, float eta_over_gamma, size_t size);
+    __global__ void
+    d_elementWiseAdd(float* c, float* a, float* b, size_t size);
+
+
+    bool arrayInit_group1(const std::vector<array_1d<float>*>& array_group1,
+        size_t numBeamlets_max);
+
+    bool arrayInit_group2(const std::vector<array_1d<float>*>& array_group2,
+        size_t numBeamletsTotal);
+
+    // this function resizes the matrices and vectors according to the active beams
+    bool DimensionReduction(const std::vector<uint8_t>& active_beams,
+        const MatReservior& VOIRes, const std::vector<MatCSR_Eigen>& VOIRes_h,
+        const MatReservior& VOIResT, const MatReservior& FGRes, const MatReservior& FGResT,
+        MatCSR64** A, MatCSR64** ATrans, MatCSR64** D, MatCSR64** DTrans,
+        eval_g& operator_eval_g, eval_grad& operator_eval_grad,
+        const std::vector<array_1d<float>*>& array_group1, const cusparseHandle_t& handle);
+    
+    bool bufferAllocate(MatCSR64& target, const array_1d<float>& input,
+        const array_1d<float>& output, const cusparseHandle_t& handle);
 
     bool assignmentTest();
 }

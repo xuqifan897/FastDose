@@ -63,6 +63,7 @@ bool IMRT::MatReservior::load(const std::vector<MatCSR_Eigen>& source) {
         current.d_csr_offsets = nullptr;
         current.d_csr_columns = nullptr;
         current.d_csr_values = nullptr;
+        current.d_buffer_spmv = nullptr;
 
         if(Eigen2Cusparse(source[i], current))
             return 1;

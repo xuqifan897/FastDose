@@ -109,18 +109,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // if (IMRT::MatReservior_dev_diag(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
-    //     std::cerr << "Function IMRT::MatReservior_dev_diag error." << std::endl;
-    //     return 1;
-    // }
-
-    // if (IMRT::MatReservior_dev(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
-    //     std::cerr << "Function IMRT::MatReservior_dev_diag error." << std::endl;
-    //     return 1;
-    // }
-
-    if (IMRT::MatReservior_dev_col(VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT)) {
-        std::cerr << "Function IMRT::MatReservior_dev_diag error." << std::endl;
+    if (IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
+        VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
+        weights_h, params, fluenceArray)) {
+        std::cerr << "Beam orientation optimization error." << std::endl;
         return 1;
     }
 }
