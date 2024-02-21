@@ -58,39 +58,7 @@ namespace IMRT {
         const Weights_h& weights_h,
         const Params& params,
         const std::vector<uint8_t>& fluenceArray);
-
-    template<class T>
-    class array_1d {
-    public:
-        ~array_1d() {
-            if (this->data != nullptr) {
-                checkCudaErrors(cudaFree(this->data));
-                this->data = nullptr;
-            }
-            if (this->vec != nullptr) {
-                checkCusparse(cusparseDestroyDnVec(this->vec));
-                this->vec = nullptr;
-            }
-        }
-        bool resize(size_t new_size) {
-            if (new_size > size) {
-                std::cerr << "Only dimension reduction supported, "
-                    "expansion not supported." << std::endl;
-                return 1;
-            }
-            if (this->vec != nullptr)
-                checkCusparse(cusparseDestroyDnVec(this->vec));
-            checkCusparse(cusparseCreateDnVec(&this->vec, new_size, this->data, CUDA_R_32F));
-            this->size = new_size;
-            return 0;
-        }
-        array_1d<T>& operator=(const array_1d<T>& other);
-        T* data = nullptr;
-        cusparseDnVecDescr_t vec = nullptr;
-        size_t size = 0;
-    };
-    template class array_1d<float>;
-    template class array_1d<uint8_t>;
+        
 
     class Weights_d {
     public:
@@ -226,7 +194,11 @@ namespace IMRT {
         cublasHandle_t cublasHandle = nullptr;
     };
 
+    // performs a = b
+    void copy_array_1d(array_1d<float>& a, const array_1d<float>& b);
     // performs c = alpha * a + beta * b;
+    void linearComb_array_1d(float alpha, const array_1d<float>& a,
+        float beta, const array_1d<float>& b, array_1d<float>& c);
     __global__ void
     d_linearComb(float* c, float alpha, float* a, float beta, float* b, size_t size);
     __global__ void
@@ -244,8 +216,29 @@ namespace IMRT {
     bool arrayInit_group1(const std::vector<array_1d<float>*>& array_group1,
         size_t numBeamlets_max);
 
-    bool arrayInit_group2(const std::vector<array_1d<float>*>& array_group2,
-        size_t numBeamletsTotal);
+    // allocate enough memory space for the sparse matrices in array_group2
+    bool arrayInit_group2(const std::vector<MatCSR64*>& array_group2,
+        const std::vector<uint8_t>& fluenceArray, int nBeams, int fluenceDim);
+    
+    class resize_group2 {
+    public:
+        ~resize_group2() {
+            if (this->bufferSize > 0 && this->buffer != nullptr) {
+                checkCudaErrors(cudaFree(this->buffer));
+            }
+            if (this->handle != nullptr) {
+                checkCusparse(cusparseDestroy(this->handle));
+            }
+        }
+        bool evaluate(const std::vector<MatCSR64*>& array_group2,
+            const array_1d<float>& fluenceArray, int nBeams, int fluenceDim);
+        
+        size_t bufferSize = 0;
+        void* buffer = nullptr;
+        cusparseHandle_t handle = nullptr;
+    };
+
+    bool arrayToMatScatter(const array_1d<float>& source, MatCSR64& target);
 
     // this function resizes the matrices and vectors according to the active beams
     bool DimensionReduction(const std::vector<uint8_t>& active_beams,
@@ -253,10 +246,15 @@ namespace IMRT {
         const MatReservior& VOIResT, const MatReservior& FGRes, const MatReservior& FGResT,
         MatCSR64** A, MatCSR64** ATrans, MatCSR64** D, MatCSR64** DTrans,
         eval_g& operator_eval_g, eval_grad& operator_eval_grad,
-        const std::vector<array_1d<float>*>& array_group1, const cusparseHandle_t& handle);
-    
-    bool bufferAllocate(MatCSR64& target, const array_1d<float>& input,
-        const array_1d<float>& output, const cusparseHandle_t& handle);
+        const std::vector<array_1d<float>*>& array_group1,
+        const std::vector<MatCSR64*>& array_group2,
+        resize_group2& operator_resize_group2,
+        const std::vector<uint8_t>& fluenceArray, int fluenceDim,
+        const cusparseHandle_t& handle);
+
+    // this function performs the element-wise operation: target[i] = max(target[i], value);
+    bool elementWiseMax(MatCSR64& target, float value);
+    __global__ void d_elementWiseMax(float* target, float value, size_t size);
 
     bool assignmentTest();
 }

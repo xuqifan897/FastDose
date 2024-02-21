@@ -3,32 +3,6 @@
 #include "IMRTOptimize.cuh"
 #include "IMRTOptimize_var.cuh"
 
-template <class T>
-IMRT::array_1d<T>& IMRT::array_1d<T>::operator=(const IMRT::array_1d<T>& other) {
-    if (this != &other) {  // Avoid self-assignment
-        if (this->size == other.size) {
-            // of the same size, no need to allocate memory
-            checkCudaErrors(cudaMemcpy(this->data, other.data,
-                other.size*sizeof(float), cudaMemcpyDeviceToDevice));
-            if (other.vec != nullptr && this->vec == nullptr)
-                checkCusparse(cusparseCreateDnVec(&this->vec, this->size, this->data, CUDA_R_32F));
-        } else {
-            if (this->vec != nullptr)
-                checkCusparse(cusparseDestroyDnVec(this->vec));
-            if (this->data != nullptr)
-                checkCudaErrors(cudaFree(this->data));
-            
-            this->size = other.size;
-            checkCudaErrors(cudaMalloc((void**)&this->data, this->size*sizeof(float)));
-            checkCudaErrors(cudaMemcpy(this->data, other.data,
-                this->size*sizeof(float), cudaMemcpyDeviceToDevice));
-            if (other.vec != nullptr)
-                checkCusparse(cusparseCreateDnVec(&this->vec, this->size, this->data, CUDA_R_32F));
-        }
-    }
-    return *this;
-}
-
 
 IMRT::eval_g::eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows_max) {
     this->PTV_voxels = ptv_voxels;
@@ -671,6 +645,25 @@ float IMRT::eval_grad::evaluate(
 }
 
 
+void IMRT::copy_array_1d(array_1d<float>& a, const array_1d<float>& b) {
+    // sanity check
+    if (a.size != b.size) {
+        std::cerr << "the sizes of the input arrays, a and b, are expect to be the same." << std::endl;
+    }
+    checkCudaErrors(cudaMemcpy(a.data, b.data, a.size*sizeof(float), cudaMemcpyDeviceToDevice));
+}
+
+
+void IMRT::linearComb_array_1d(float alpha, const array_1d<float>& a,
+    float beta, const array_1d<float>& b, array_1d<float>& c) {
+    dim3 blockSize(64, 1, 1);
+    dim3 gridSize(1, 1, 1);
+    gridSize.x = (a.size + blockSize.x - 1) / blockSize.x;
+    d_linearComb<<<gridSize, blockSize>>>(c.data, alpha, a.data, beta, b.data, a.size);
+    checkCudaErrors(cudaDeviceSynchronize());
+}
+
+
 __global__ void
 IMRT::d_linearComb(float* c, float alpha, float* a, float beta, float* b, size_t size) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -731,21 +724,16 @@ bool IMRT::arrayInit_group1(const std::vector<array_1d<float>*>& array_group1,
 }
 
 
-bool IMRT::arrayInit_group2(const std::vector<array_1d<float>*>& array_group2,
-    size_t numBeamletsTotal) {
-    for (auto* ptr : array_group2) {
-        arrayInit(*ptr, numBeamletsTotal);
-    }
-    return 0;
-}
-
-
 bool IMRT::DimensionReduction(const std::vector<uint8_t>& active_beams,
     const MatReservior& VOIRes, const std::vector<MatCSR_Eigen>& VOIRes_h,
     const MatReservior& VOIResT, const MatReservior& FGRes, const MatReservior& FGResT,
     MatCSR64** A, MatCSR64** ATrans, MatCSR64** D, MatCSR64** DTrans,
     eval_g& operator_eval_g, eval_grad& operator_eval_grad,
-    const std::vector<array_1d<float>*>& array_group1, const cusparseHandle_t& handle
+    const std::vector<array_1d<float>*>& array_group1,
+    const std::vector<MatCSR64*>& array_group2,
+    resize_group2& operator_resize_group2,
+    const std::vector<uint8_t>& fluenceArray, int fluenceDim,
+    const cusparseHandle_t& handle
 ) {
     // release old data
     if (*A != nullptr)
@@ -787,6 +775,25 @@ bool IMRT::DimensionReduction(const std::vector<uint8_t>& active_beams,
         if (ptr->resize(numBeamlets_current)) {
         return 1;
     }
+
+    
+    std::vector<float> currentActiveBeamlets(fluenceArray.size(), 0);
+    size_t numBeamletsPerBeam = fluenceDim * fluenceDim;
+    for (size_t i=0; i<active_beams.size(); i++) {
+        if (active_beams[i] == 0)
+            continue;
+        size_t idx_begin = i * numBeamletsPerBeam;
+        size_t idx_end = (i + 1) * numBeamletsPerBeam;
+        for (size_t j=idx_begin; j<idx_end; j++)
+            currentActiveBeamlets[j] = fluenceArray[j] > 0;
+    }
+    array_1d<float> currentActiveBeamlets_device;
+    arrayInit(currentActiveBeamlets_device, currentActiveBeamlets.size());
+    checkCudaErrors(cudaMemcpy(currentActiveBeamlets_device.data, currentActiveBeamlets.data(),
+        currentActiveBeamlets_device.size*sizeof(float), cudaMemcpyHostToDevice));
+    operator_resize_group2.evaluate(array_group2, currentActiveBeamlets_device,
+        active_beams.size(), fluenceDim);
+    
 
     // allocate buffer
     array_1d<float> vecX, vecY, vecZ;

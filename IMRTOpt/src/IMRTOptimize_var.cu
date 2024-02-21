@@ -875,3 +875,57 @@ bool IMRT::MatReservior_dev_diag(
 
     return 0;
 }
+
+
+bool IMRT::transposeConsistency(const MatCSR64& A, const MatCSR64& ATrans,
+    const cusparseHandle_t& handle) {
+    // sanity check
+    if (A.d_buffer_spmv == nullptr || ATrans.d_buffer_spmv == nullptr) {
+        std::cerr << "We supposes that the buffer should be initialized." << std::endl;
+        return 1;
+    }
+    array_1d<float> array_input, array_output;
+    arrayInit(array_input, A.numCols);
+    arrayInit(array_output, A.numRows);
+    arrayRand01(array_input);
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    checkCusparse(cusparseSpMV(
+        handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, A.matA, array_input.vec, &beta, array_output.vec,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, A.d_buffer_spmv));
+    
+    std::vector<float> result_A(array_output.size);
+    checkCudaErrors(cudaMemcpy(result_A.data(), array_output.data,
+        array_output.size*sizeof(float), cudaMemcpyDeviceToHost));
+    
+    size_t ATrans_compute_buffer_size = 0;
+    void* ATrans_compute_buffer = nullptr;
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle, CUSPARSE_OPERATION_TRANSPOSE,
+        &alpha, ATrans.matA, array_input.vec, &beta, array_output.vec,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, &ATrans_compute_buffer_size));
+    checkCudaErrors(cudaMalloc(&ATrans_compute_buffer, ATrans_compute_buffer_size));
+
+    checkCusparse(cusparseSpMV(
+        handle, CUSPARSE_OPERATION_TRANSPOSE,
+        &alpha, ATrans.matA, array_input.vec, &beta, array_output.vec,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, ATrans_compute_buffer));
+    
+    std::vector<float> result_ATrans(array_output.size);
+    checkCudaErrors(cudaMemcpy(result_ATrans.data(), array_output.data,
+        array_output.size*sizeof(float), cudaMemcpyDeviceToHost));
+    
+    checkCudaErrors(cudaFree(ATrans_compute_buffer));
+
+    // verification
+    for (size_t i=0; i<result_A.size(); i++) {
+        if (abs(result_A[i] - result_ATrans[i]) > 1e-4f * std::abs(result_A[i])) {
+            std::cerr << "result unmatch at index " << i << ", (result_A[i], result_ATrans[i]) == ("
+                << result_A[i] << ", " << result_ATrans[i] << std::endl;
+            return 1;
+        }
+    }
+    return 0;
+}

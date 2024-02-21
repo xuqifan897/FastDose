@@ -17,8 +17,8 @@
 {                                                                              \
     cusparseStatus_t status = (func);                                          \
     if (status != CUSPARSE_STATUS_SUCCESS) {                                   \
-        printf("CUSPARSE API failed at line %d with error: %s (%d)\n",         \
-               __LINE__, cusparseGetErrorString(status), status);              \
+        printf("CUSPARSE API failed at %s:%d with error: %s (%d)\n",         \
+               __FILE__, __LINE__, cusparseGetErrorString(status), status);   \
         exit(EXIT_FAILURE);                                                   \
     }                                                                          \
 }
@@ -34,7 +34,7 @@ namespace IMRT {
 
         ~MatCSR64() {
             if (this->matA != nullptr) {
-                checkCusparse(cusparseDestroySpMat(matA));
+                checkCusparse(cusparseDestroySpMat(this->matA));
                 this->matA = nullptr;
             }
             if (this->d_csr_offsets != nullptr) {
