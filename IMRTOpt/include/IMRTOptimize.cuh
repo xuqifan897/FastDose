@@ -57,7 +57,13 @@ namespace IMRT {
         const std::vector<MatCSR_Eigen>& SpFluenceGradT,
         const Weights_h& weights_h,
         const Params& params,
-        const std::vector<uint8_t>& fluenceArray);
+        const std::vector<uint8_t>& fluenceArray,
+        // results
+        std::vector<float>& xFull,
+        std::vector<float>& costs,
+        std::vector<int>& activeBeams,
+        std::vector<float>& activeNorms,
+        std::vector<std::pair<int, std::vector<int>>>& topN);
         
 
     class Weights_d {

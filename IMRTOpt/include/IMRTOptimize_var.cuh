@@ -74,7 +74,8 @@ namespace IMRT {
 
     bool beamWeightsInit_func(
         const MatReservior& VOIRes, array_1d<float>& beamWeightsInit,
-        size_t ptv_voxels, size_t oar_voxels, const cusparseHandle_t& handle);
+        size_t ptv_voxels, size_t oar_voxels, const cusparseHandle_t& handle,
+        const cublasHandle_t& cublas_handle);
 
     class proxL2Onehalf_QL_gpu{
     public:
@@ -103,30 +104,27 @@ namespace IMRT {
     class calc_rhs {
     public:
         calc_rhs();
-        ~calc_rhs();
         // allocate enough space for calculation
         // bufferSize in the number of elements.
         bool customInit(size_t bufferSize);
         bool evaluate(float& rhs, float gy, float t, const array_1d<float>& gradAty,
-            const array_1d<float>& x, const array_1d<float>& y);
+            const array_1d<float>& x, const array_1d<float>& y,
+            const cublasHandle_t& cublas_handle);
 
         array_1d<float> firstTerm;
         array_1d<float> x_minus_y;
-        cublasHandle_t cublas_handle;
     };
 
     class calc_loss {
     public:
         calc_loss();
-        ~calc_loss();
         bool customInit(size_t nBeams);
         bool evaluate(
             float& cost, float gx, const array_1d<float>& beamWeights,
-            const array_1d<float>& beamNorms);
+            const array_1d<float>& beamNorms, const cublasHandle_t& cublas_handle);
         
         array_1d<float> buffer_sqrt;
         array_1d<float> buffer_mul;
-        cublasHandle_t cublas_handle;
     };
 
     bool elementWiseSquare(float* source, float* target, size_t size);
@@ -167,5 +165,13 @@ namespace IMRT {
     // performs source[i] = a * source[i];
     bool elementWiseScale(float* source, float a, size_t size);
     __global__ void d_elementWiseScale(float* source, float a, size_t size);
+
+    // performs target[i] = source[i] > a;
+    bool elementWiseGreater(float* source, float* target, float a, size_t size);
+    __global__ void d_elementWiseGreater(
+        float* source, float* target, float a, size_t size);
+
+    bool beamSort(const std::vector<float>& beamNorms_h,
+        std::vector<std::pair<int, float>>& beamNorms_pair);
 }
 #endif

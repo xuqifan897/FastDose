@@ -14,7 +14,7 @@ IMRT::array_1d<T>::~array_1d() {
 
 template<class T>
 bool IMRT::array_1d<T>::resize(size_t new_size) {
-    if (new_size > size) {
+    if (new_size > this->size) {
         std::cerr << "Only dimension reduction supported, "
             "expansion not supported." << std::endl;
         return 1;
@@ -57,7 +57,8 @@ template class IMRT::array_1d<uint8_t>;
 
 bool IMRT::beamWeightsInit_func(
     const MatReservior& VOIRes, array_1d<float>& beamWeightsInit,
-    size_t ptv_voxels, size_t oar_voxels, const cusparseHandle_t& handle) {
+    size_t ptv_voxels, size_t oar_voxels, const cusparseHandle_t& handle,
+    const cublasHandle_t& cublas_handle) {
     size_t bufferSize = 0;
     void* buffer = nullptr;
     array_1d<float> output;
@@ -66,8 +67,6 @@ bool IMRT::beamWeightsInit_func(
     std::vector<float> beamWeightsInit_h(nBeams, 0.0f);
     float alpha = 1.0f;
     float beta = 0.0f;
-    cublasHandle_t cublas_handle;
-    checkCublas(cublasCreate(&cublas_handle));
 
     for (int i=0; i<nBeams; i++) {
         const MatCSR64& mat = VOIRes.reservior[i];
@@ -184,7 +183,8 @@ bool IMRT::resize_group2::evaluate(const std::vector<MatCSR64*>& array_group2,
         CUSPARSE_DENSETOSPARSE_ALG_DEFAULT, &bufferSize_local));
     if (bufferSize_local > this->bufferSize) {
         this->bufferSize = bufferSize_local;
-        checkCudaErrors(cudaFree(this->buffer));
+        if (this->buffer != nullptr)
+            checkCudaErrors(cudaFree(this->buffer));
         checkCudaErrors(cudaMalloc(&(this->buffer), this->bufferSize));
     }
 
@@ -416,6 +416,37 @@ __global__ void IMRT::d_elementWiseScale(
     source[idx] = source[idx] * a;
 }
 
+bool IMRT::elementWiseGreater(float* source,
+    float* target, float a, size_t size) {
+    dim3 blockSize(64, 1, 1);
+    dim3 gridSize(1, 1, 1);
+    gridSize.x = (size + blockSize.x - 1) / blockSize.x;
+    d_elementWiseGreater<<<gridSize, blockSize>>>(source, target, a, size);
+    return 0;
+}
+
+__global__ void IMRT::d_elementWiseGreater(float* source,
+    float* target, float a, size_t size) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+    if (idx >= size)
+        return;
+    target[idx] = (source[idx] > a);
+}
+
+bool IMRT::beamSort(const std::vector<float>& beamNorms_h,
+    std::vector<std::pair<int, float>>& beamNorms_pair) {
+    int nBeams = beamNorms_h.size();
+    beamNorms_pair.resize(nBeams);
+    for (int i=0; i<nBeams; i++) {
+        beamNorms_pair[i] = std::make_pair(i, beamNorms_h[i]);
+    }
+    auto customComparator = [](const std::pair<int, float>& a,
+        const std::pair<int, float>& b) {
+        return a.second > b.second; };
+    std::sort(beamNorms_pair.begin(), beamNorms_pair.end(), customComparator);
+    return 0;
+}
+
 bool IMRT::proxL2Onehalf_QL_gpu::customInit(const MatCSR64& g0) {
     // In here, we assume the input g0 has the maximum nnz
     arrayInit(this->g0_square_values, g0.nnz);
@@ -468,6 +499,8 @@ bool IMRT::proxL2Onehalf_QL_gpu::evaluate(
         CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
     if (this->sum_buffer_size < bufferSize) {
         this->sum_buffer_size =  bufferSize;
+        if (this->sum_buffer != nullptr)
+            checkCudaErrors(cudaFree(this->sum_buffer));
         checkCudaErrors(cudaMalloc(&this->sum_buffer, bufferSize));
     }
 
@@ -530,12 +563,6 @@ IMRT::calc_rhs::calc_rhs() {
     this->x_minus_y.vec = nullptr;
     this->x_minus_y.data = nullptr;
     this->x_minus_y.size = 0;
-    this->cublas_handle = nullptr;
-}
-
-IMRT::calc_rhs::~calc_rhs() {
-    if (this->cublas_handle != nullptr)
-        checkCublas(cublasDestroy(this->cublas_handle));
 }
 
 bool IMRT::calc_rhs::customInit(size_t bufferSize) {
@@ -545,11 +572,13 @@ bool IMRT::calc_rhs::customInit(size_t bufferSize) {
     }
     arrayInit(this->firstTerm, bufferSize);
     arrayInit(this->x_minus_y, bufferSize);
+    return 0;
 }
 
 bool IMRT::calc_rhs::evaluate(
     float& rhs, float gy, float t, const array_1d<float>& gradAty,
-    const array_1d<float>& x, const array_1d<float>& y) {
+    const array_1d<float>& x, const array_1d<float>& y,
+    const cublasHandle_t& cublas_handle) {
     if (x.size != gradAty.size || x.size != y.size) {
         std::cerr << "Input size inconsistency." << std::endl;
         return 1;
@@ -563,14 +592,14 @@ bool IMRT::calc_rhs::evaluate(
     elementWiseMul(gradAty.data, this->x_minus_y.data,
         this->firstTerm.data, 1.0f, gradAty.size);
     float value1;
-    checkCublas(cublasSasum(this->cublas_handle, gradAty.size,
+    checkCublas(cublasSasum(cublas_handle, gradAty.size,
         this->firstTerm.data, 1, &value1));
 
     checkCudaErrors(cudaDeviceSynchronize());
     elementWiseSquare(this->x_minus_y.data,
         this->firstTerm.data, gradAty.size);
     float value2;
-    checkCublas(cublasSasum(this->cublas_handle, gradAty.size,
+    checkCublas(cublasSasum(cublas_handle, gradAty.size,
         this->firstTerm.data, 1, &value2));
     
     rhs = gy + value1 + value2 * 0.5f / t;
@@ -584,24 +613,17 @@ IMRT::calc_loss::calc_loss() {
     this->buffer_mul.size = 0;
     this->buffer_mul.vec = nullptr;
     this->buffer_mul.data = nullptr;
-    this->cublas_handle = nullptr;
-}
-
-IMRT::calc_loss::~calc_loss() {
-    if (this->cublas_handle != nullptr)
-        checkCublas(cublasDestroy(this->cublas_handle));
 }
 
 bool IMRT::calc_loss::customInit(size_t nBeams) {
     arrayInit(this->buffer_sqrt, nBeams);
     arrayInit(this->buffer_mul, nBeams);
-    checkCublas(cublasCreate(&this->cublas_handle));
     return 0;
 }
 
 bool IMRT::calc_loss::evaluate(
     float& cost, float gx, const array_1d<float>& beamWeights,
-    const array_1d<float>& beamNorms) {
+    const array_1d<float>& beamNorms, const cublasHandle_t& cublas_handle) {
     // sanity check
     if (beamWeights.size != beamNorms.size ||
         beamWeights.size != this->buffer_sqrt.size ||
@@ -615,7 +637,7 @@ bool IMRT::calc_loss::evaluate(
     
     checkCudaErrors(cudaDeviceSynchronize());
     float value1;
-    checkCublas(cublasSasum(this->cublas_handle, beamNorms.size,
+    checkCublas(cublasSasum(cublas_handle, beamNorms.size,
         this->buffer_mul.data, 1, &value1));
     cost = gx + value1;
     return 0;
