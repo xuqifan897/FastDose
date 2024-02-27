@@ -2,6 +2,7 @@
 #define __IMRTOPTIMIZE_VAR_CUH__
 #include "IMRTDoseMat.cuh"
 #include "IMRTDoseMatEigen.cuh"
+#include "cublas_v2.h"
 
 namespace IMRT {
     template<class T>
@@ -13,6 +14,7 @@ namespace IMRT {
         T* data = nullptr;
         cusparseDnVecDescr_t vec = nullptr;
         size_t size = 0;
+        size_t init_flag = false;
     };
 
     // estimate the size of the total matrix.
@@ -84,12 +86,13 @@ namespace IMRT {
         bool customInit(const MatCSR64& g0);
         ~proxL2Onehalf_QL_gpu();
         bool evaluate(const MatCSR64& g0, const array_1d<float>& beamWeights, float t,
-            MatCSR64& prox, array_1d<float>& nrmnew);
+            MatCSR64& prox, array_1d<float>& nrmnew, const cublasHandle_t& cublas_handle);
 
         bool initFlag = false;
         array_1d<float> g0_square_values;
         array_1d<float> sum_input;
         array_1d<float> nrm2;
+        array_1d<float> nrm2_sum;
         array_1d<float> nrm234;
         array_1d<float> alpha;
         array_1d<float> sHat;
@@ -145,9 +148,10 @@ namespace IMRT {
     bool bufferAllocate(MatCSR64& target, const array_1d<float>& input,
         const array_1d<float>& output, const cusparseHandle_t& handle);
     
-    // performs tHat(alpha > 2 * root6 / 9) = 0;
-    bool tHat_step2(float* tHat, float* alpha, size_t size);
-    __global__ void d_tHat_step2(float* tHat, float* alpha, size_t size);
+    // performs tHat(alpha > 2 * root6 / 9) = 0; nrm2 is used to tell whether
+    // the alpha element is nan. alpha element is nan when nrm2 is 0.
+    bool tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size);
+    __global__ void d_tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size);
 
     // performs prox = tHat' * g0 in an element-wise manner
     // as prox has the same structure as g0, just provide prox_values

@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 
-#define MAX_THETA_ANGLES 16
+#define MAX_THETA_ANGLES 24
 
 namespace fastdose{
     class KERNEL_h {

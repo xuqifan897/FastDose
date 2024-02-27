@@ -8,7 +8,7 @@
 #include "IMRTDoseMatEigen.cuh"
 #include "IMRTOptimize_var.cuh"
 #include "IMRTArgs.h"
-
+#include "IMRTDebug.cuh"
 
 bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL(
     const std::vector<MatCSR_Eigen>& VOIMatrices,
@@ -58,7 +58,7 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL(
         D_rows_max += FGRes.reservior[i].numRows;
         numBeamlets_max += VOIRes.reservior[i].numCols;
     }
-    std::cout << "The maximum number of rows of matrix D: " << D_rows_max
+    std::cout << std::scientific << "The maximum number of rows of matrix D: " << D_rows_max
         << "\nThe maximum number of beamlets: " << numBeamlets_max << "\n" << std::endl;
 
     MatCSR64 *A=nullptr, *ATrans=nullptr, *D=nullptr, *DTrans=nullptr;
@@ -82,7 +82,7 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL(
     std::vector<MatCSR64*> array_group2{&x2d, &x2dprox};
     arrayInit_group1(array_group1, numBeamlets_max);
     arrayInit_group2(array_group2, fluenceArray, nBeams, fluenceDim);
-    arrayInit(nrm, nBeams);  arrayInit(beamWeights, nBeams);
+    arrayInit(nrm, nBeams);
     arrayInit(beamWeights_active, nBeams); arrayInit(beamWeights_activeStrict, nBeams);
 
     resize_group2 operator_resize_group2;
@@ -188,10 +188,12 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL(
 
             if (! proxL2Onehalf_operator.initFlag)
                 proxL2Onehalf_operator.customInit(x2d);
-            proxL2Onehalf_operator.evaluate(x2d, beamWeights, t, x2dprox, nrm);
+            if (proxL2Onehalf_operator.evaluate(x2d, beamWeights, t,
+                x2dprox, nrm, cublas_handle))
+                return 1;
 
             checkCudaErrors(cudaMemcpy(x.data, x2dprox.d_csr_values,
-                x2d.nnz, cudaMemcpyDeviceToDevice));
+                x2d.nnz*sizeof(float), cudaMemcpyDeviceToDevice));
 
             gx = operator_eval_g.evaluate(
                 *A, *D, x, params.gamma, handle,
@@ -219,6 +221,10 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL(
         float cost;
         operator_calc_loss.evaluate(cost, gx, beamWeights, nrm, cublas_handle);
         costs.push_back(cost);
+        #if BOO_IMRT_DEBUG
+            std::cout << "iteration: " << k << ", cost: " << cost << ", theta: "
+                << theta << std::endl;
+        #endif
         elementWiseGreater(beamWeights.data, beamWeights_active.data, 1e-2f, nBeams);
         elementWiseGreater(beamWeights.data, beamWeights_activeStrict.data, 1e-6f, nBeams);
         float numActiveBeams = 0, numActiveBeamsStrict = 0;

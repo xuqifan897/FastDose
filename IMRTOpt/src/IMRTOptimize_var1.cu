@@ -118,7 +118,6 @@ bool IMRT::beamWeightsInit_func(
         for (int i=0; i<nBeams; i++)
             std::cout << beamWeightsInit_h[i] << "  ";
         std::cout << std::endl;
-        return 0;
     #endif
 
     // here we assume the output, beamWeightsInit, is already initialized
@@ -336,21 +335,23 @@ __global__ void IMRT::d_calc_sHat(float* sHat, float* alpha, size_t size) {
 #undef TWO_OVER_ROOT3
 }
 
-bool IMRT::tHat_step2(float* tHat, float* alpha, size_t size) {
+bool IMRT::tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size) {
     dim3 blockSize(64, 1, 1);
     dim3 gridSize(1, 1, 1);
     gridSize.x = (size + blockSize.x - 1) / blockSize.x;
-    d_tHat_step2<<<gridSize, blockSize>>>(tHat, alpha, size);
+    d_tHat_step2<<<gridSize, blockSize>>>(tHat, alpha, nrm2, size);
     return 0;
 }
 
-__global__ void IMRT::d_tHat_step2(float* tHat, float* alpha, size_t size) {
+__global__ void IMRT::d_tHat_step2(
+    float* tHat, float* alpha, float* nrm2, size_t size) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
     if (idx >= size)
         return;
 #define TWO_TIMES_ROOT6_OVER_NINE 0.5443310539518174f
     float alpha_value = alpha[idx];
-    if (alpha_value > TWO_TIMES_ROOT6_OVER_NINE)
+    float nrm2_value = nrm2[idx];
+    if (nrm2_value < 1e-4f || alpha_value > TWO_TIMES_ROOT6_OVER_NINE)
         tHat[idx] = 0.0f;
 #undef TWO_TIMES_ROOT6_OVER_NINE
 }
@@ -452,6 +453,7 @@ bool IMRT::proxL2Onehalf_QL_gpu::customInit(const MatCSR64& g0) {
     arrayInit(this->g0_square_values, g0.nnz);
     arrayInit(this->sum_input, g0.numCols);
     arrayInit(this->nrm2, g0.numRows);
+    arrayInit(this->nrm2_sum, g0.numRows);
     arrayInit(this->nrm234, g0.numRows);
     arrayInit(this->alpha, g0.numRows);
     arrayInit(this->sHat, g0.numRows);
@@ -460,6 +462,11 @@ bool IMRT::proxL2Onehalf_QL_gpu::customInit(const MatCSR64& g0) {
     arrayInit(this->nrm2newbuff, g0.numRows);
     checkCusparse(cusparseCreate(&this->handle));
     this->initFlag = true;
+
+    // set the values of this->sum_input
+    std::vector<float> sum_input_host(g0.numCols, 1.0f);
+    checkCudaErrors(cudaMemcpy(this->sum_input.data, sum_input_host.data(),
+        g0.numCols * sizeof(float), cudaMemcpyHostToDevice));
     return 0;
 }
 
@@ -476,7 +483,7 @@ IMRT::proxL2Onehalf_QL_gpu::~proxL2Onehalf_QL_gpu() {
 
 bool IMRT::proxL2Onehalf_QL_gpu::evaluate(
     const MatCSR64& g0, const array_1d<float>& beamWeights, float t,
-    MatCSR64& prox, array_1d<float>& nrmnew) {
+    MatCSR64& prox, array_1d<float>& nrmnew, const cublasHandle_t& cublas_handle) {
     elementWiseSquare(g0.d_csr_values, this->g0_square_values.data, g0.nnz);
     // for safety concerns, synchronize between the cuda kernels and cusparse APIs
     checkCudaErrors(cudaDeviceSynchronize());
@@ -518,7 +525,7 @@ bool IMRT::proxL2Onehalf_QL_gpu::evaluate(
 
     elementWiseSquare(this->sHat.data, this->tHat.data, this->sHat.size);
 
-    tHat_step2(this->tHat.data, this->alpha.data, this->tHat.size);
+    tHat_step2(this->tHat.data, this->alpha.data, this->nrm2.data, this->tHat.size);
 
     if (g0.numRows != prox.numRows || g0.numCols != prox.numCols
         || g0.nnz != prox.nnz) {

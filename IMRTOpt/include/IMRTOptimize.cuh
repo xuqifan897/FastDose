@@ -6,6 +6,9 @@
 #include "IMRTDoseMat.cuh"
 #include "IMRTOptimize_var.cuh"
 
+#define SHOW_VAR(obj, var) viewArray(obj, var, __FILE__, __LINE__)
+#define BOO_IMRT_DEBUG true
+
 #define checkCublas(err)                                                                          \
     do {                                                                                           \
         cublasStatus_t err_ = (err);                                                               \
@@ -126,7 +129,7 @@ namespace IMRT {
         cublasHandle_t cublasHandle = nullptr;
     };
 
-    void arrayInit(array_1d<float>& arr, size_t size);
+    bool arrayInit(array_1d<float>& arr, size_t size);
     void arrayRand01(array_1d<float>& arr);
 
     __global__ void

@@ -34,10 +34,17 @@ IMRT::eval_g::eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows_max) {
     checkCublas(cublasCreate(&this->cublasHandle));
 }
 
-void IMRT::arrayInit(array_1d<float>& arr, size_t size) {
+bool IMRT::arrayInit(array_1d<float>& arr, size_t size) {
+    if (arr.init_flag) {
+        std::cerr << "The array is already initialized. Double "
+            "initialization not allowed." << std::endl;
+        return 1;
+    }
+    arr.init_flag = true;
     arr.size = size;
     checkCudaErrors(cudaMalloc((void**)&arr.data, arr.size * sizeof(float)));
     checkCusparse(cusparseCreateDnVec(&arr.vec, arr.size, arr.data, CUDA_R_32F));
+    return 0;
 }
 
 IMRT::eval_g::~eval_g() {
@@ -144,7 +151,8 @@ float IMRT::eval_g::evaluate(const MatCSR64& A, const MatCSR64& D,
     float result = 0.5f * sum1  +  0.5f * sum2  +  0.5f * sum3
         +  eta * sum4  +  0.5f / gamma * sum5;
 
-    #if false
+    #if true
+        // for debug purposes
         std::cout << "(sum1, sum2, sum3, sum4, sum5) == (" << sum1 << ", " << sum2
             << ", " << sum3 << ", " << sum4 << ", " << sum5 << ")" << std::endl;
     #endif
