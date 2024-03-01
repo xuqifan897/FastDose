@@ -58,6 +58,31 @@ set_target_properties(MaskGen
     RUNTIME_OUTPUT_DIRECTORY ${BINARY_DIR}
 )
 
+add_executable(OptBench OptBench.cu ${IMRTSources} ${IMRTHeaders})
+target_link_libraries(OptBench PRIVATE FastDose)
+target_link_libraries(OptBench PRIVATE cusparse)
+target_link_libraries(OptBench PRIVATE cublas)
+target_link_libraries(OptBench PRIVATE Eigen3::Eigen)
+target_include_directories(OptBench PRIVATE ./include)
+target_include_directories(OptBench PRIVATE ${CUDA_INCLUDE_DIRS})
+set_target_properties(OptBench
+    PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${BINARY_DIR})
+
+target_include_directories(OptBench PRIVATE ${Boost_INCLUDE_DIRS})
+target_link_libraries(OptBench PRIVATE Boost::program_options Boost::filesystem)
+target_include_directories(OptBench PRIVATE ${HDF5_INCLUDE_DIRS})
+target_link_libraries(OptBench PRIVATE
+    ${HDF5_CXX_HL_LIBRARIES}
+    ${HDF5_CXX_LIBRARIES}
+    ${HDF5_C_HL_LIBRARIES}
+    ${HDF5_C_LIBRARIES}
+    -lz
+)
+
+target_link_libraries(OptBench PRIVATE OpenMP::OpenMP_CXX)
+target_compile_options(OptBench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${OpenMP_CXX_FLAGS}>)
+
 # set(CMAKE_BUILD_TYPE Debug)
 # set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -use_fast_math -g -G")
