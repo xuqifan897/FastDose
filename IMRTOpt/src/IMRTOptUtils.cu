@@ -4,11 +4,10 @@
 #include "IMRTOptimize_var.cuh"
 
 
-IMRT::eval_g::eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows_max) {
+IMRT::eval_g::eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows) {
     this->PTV_voxels = ptv_voxels;
     this->OAR_voxels = oar_voxels;
-    this->D_rows_max = d_rows_max;
-    this->D_rows_current = 0;
+    this->D_rows = d_rows;
     this->alpha = 1.0f;
     this->beta = 0.0f;
 
@@ -22,16 +21,14 @@ IMRT::eval_g::eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows_max) {
     arrayInit(this->prox1, this->PTV_voxels);
     arrayInit(this->prox2, this->PTV_voxels + this->OAR_voxels);
     arrayInit(this->term3, this->OAR_voxels);
-    arrayInit(this->term4, this->D_rows_max);
-    arrayInit(this->prox4, this->D_rows_max);
+    arrayInit(this->term4, this->D_rows);
+    arrayInit(this->prox4, this->D_rows);
 
     arrayInit(this->sumProx1, this->prox1.size);
     arrayInit(this->sumProx2, this->prox2.size);
     arrayInit(this->sumTerm3, this->term3.size);
     arrayInit(this->sumProx4, this->prox4.size);
     arrayInit(this->sumProx4Term4, this->prox4.size);
-
-    checkCublas(cublasCreate(&this->cublasHandle));
 }
 
 bool IMRT::arrayInit(array_1d<float>& arr, size_t size) {
@@ -47,6 +44,20 @@ bool IMRT::arrayInit(array_1d<float>& arr, size_t size) {
     return 0;
 }
 
+bool IMRT::arrayInit(array_1d<float>& arr, const Eigen::VectorXf& source) {
+    if (arr.init_flag) {
+        std::cerr << "The array is already initialized. Double "
+            "initialization not allowed." << std::endl;
+        return 1;
+    }
+    arr.init_flag = true;
+    arr.size = source.size();
+    checkCudaErrors(cudaMalloc((void**)&arr.data, arr.size*sizeof(float)));
+    checkCudaErrors(cudaMemcpy(arr.data, source.data(), arr.size*sizeof(float), cudaMemcpyHostToDevice));
+    checkCusparse(cusparseCreateDnVec(&arr.vec, arr.size, arr.data, CUDA_R_32F));
+    return 0;
+}
+
 IMRT::eval_g::~eval_g() {
     if (this->stream1)
         checkCudaErrors(cudaStreamDestroy(this->stream1));
@@ -58,24 +69,14 @@ IMRT::eval_g::~eval_g() {
         checkCudaErrors(cudaStreamDestroy(this->stream4));
     if (this->stream5)
         checkCudaErrors(cudaStreamDestroy(this->stream5));
-    if (this->cublasHandle)
-        cublasDestroy(this->cublasHandle);
-}
-
-void IMRT::eval_g::resize(size_t D_rows_current_) {
-    this->D_rows_current = D_rows_current_;
-
-    this->term4.resize(this->D_rows_current);
-    this->prox4.resize(this->D_rows_current);
-    this->sumProx4.resize(this->D_rows_current);
-    this->sumProx4Term4.resize(this->D_rows_current);
 }
 
 float IMRT::eval_g::evaluate(const MatCSR64& A, const MatCSR64& D,
     const array_1d<float>& x, float gamma,
-    const cusparseHandle_t& handle,
+    const cusparseHandle_t& handle_cusparse,
+    const cublasHandle_t& handle_cublas,
     
-    float* maxDose,
+    const float* maxDose,
     const float* minDoseTarget,
     const float* minDoseTargetWeights,
     const float* maxWeightsLong,
@@ -90,11 +91,11 @@ float IMRT::eval_g::evaluate(const MatCSR64& A, const MatCSR64& D,
         }
     #endif
 
-    checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    checkCusparse(cusparseSpMV(handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
         &this->alpha, A.matA, x.vec, &this->beta, this->Ax.vec, CUDA_R_32F,
         CUSPARSE_SPMV_ALG_DEFAULT, A.d_buffer_spmv));
 
-    checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    checkCusparse(cusparseSpMV(handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
         &this->alpha, D.matA, x.vec, &this->beta, this->term4.vec, CUDA_R_32F,
         CUSPARSE_SPMV_ALG_DEFAULT, D.d_buffer_spmv));
 
@@ -112,9 +113,9 @@ float IMRT::eval_g::evaluate(const MatCSR64& A, const MatCSR64& D,
     checkCudaErrors(cudaMemcpyAsync(this->term3.data, this->Ax.data + this->PTV_voxels,
         this->OAR_voxels * sizeof(float), cudaMemcpyDeviceToDevice, this->stream3));
 
-    gridSize.x = (this->D_rows_current + blockSize.x - 1) / blockSize.x;
+    gridSize.x = (this->D_rows + blockSize.x - 1) / blockSize.x;
     d_prox1Norm<<<gridSize, blockSize, 0, this->stream4>>>(
-        this->prox4.data, this->term4.data, gamma, this->D_rows_current);
+        this->prox4.data, this->term4.data, gamma, this->D_rows);
 
     gridSize.x = (this->prox1.size + blockSize.x - 1) / blockSize.x;
     d_ATimesBSquare<<<gridSize, blockSize, 0, this->stream1>>>(
@@ -137,25 +138,19 @@ float IMRT::eval_g::evaluate(const MatCSR64& A, const MatCSR64& D,
 
     checkCudaErrors(cudaDeviceSynchronize());
     float sum1, sum2, sum3, sum4, sum5;
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx1.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx1.size,
         this->sumProx1.data, 1, &sum1));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx2.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx2.size,
         this->sumProx2.data, 1, &sum2));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumTerm3.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumTerm3.size,
         this->sumTerm3.data, 1, &sum3));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx4.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx4.size,
         this->sumProx4.data, 1, &sum4));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx4Term4.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx4Term4.size,
         this->sumProx4Term4.data, 1, &sum5));
     
-    float result = 0.5f * sum1  +  0.5f * sum2  +  0.5f * sum3
-        +  eta * sum4  +  0.5f / gamma * sum5;
-
-    #if true
-        // for debug purposes
-        std::cout << "(sum1, sum2, sum3, sum4, sum5) == (" << sum1 << ", " << sum2
-            << ", " << sum3 << ", " << sum4 << ", " << sum5 << ")" << std::endl;
-    #endif
+    float result = 0.5f * (sum1 + sum2 + sum3)
+        +  eta * (sum4 + 0.5f / gamma * sum5);
 
     return result;
 }
@@ -471,9 +466,9 @@ bool IMRT::Weights_d::fromHost(const Weights_h& source) {
 
 
 IMRT::eval_grad::eval_grad(size_t ptv_voxels, size_t oar_voxels,
-    size_t numBeamlets_max_, size_t d_rows_max_): PTV_voxels(ptv_voxels),
-    OAR_voxels(oar_voxels), numBeamlets_max(numBeamlets_max_), numBeamlets_current(0),
-    D_rows_max(d_rows_max_), D_rows_current(0), alpha(1.0f), beta(0.0f)
+    size_t d_rows, size_t num_beamlets): PTV_voxels(ptv_voxels),
+    OAR_voxels(oar_voxels), D_rows(d_rows), numBeamlets(num_beamlets),
+    alpha(1.0f), beta(0.0f)
 {
     checkCudaErrors(cudaStreamCreate(&this->stream1));
     checkCudaErrors(cudaStreamCreate(&this->stream2));
@@ -485,8 +480,8 @@ IMRT::eval_grad::eval_grad(size_t ptv_voxels, size_t oar_voxels,
     arrayInit(this->prox1, this->PTV_voxels);
     arrayInit(this->prox2, this->PTV_voxels + this->OAR_voxels);
     arrayInit(this->term3, this->OAR_voxels);
-    arrayInit(this->term4, this->D_rows_max);
-    arrayInit(this->prox4, this->D_rows_max);
+    arrayInit(this->term4, this->D_rows);
+    arrayInit(this->prox4, this->D_rows);
 
     arrayInit(this->sumProx1, this->prox1.size);
     arrayInit(this->sumProx2, this->prox2.size);
@@ -495,11 +490,9 @@ IMRT::eval_grad::eval_grad(size_t ptv_voxels, size_t oar_voxels,
     arrayInit(this->sumProx4Term4, this->prox4.size);
 
     arrayInit(this->grad_term1_input, this->PTV_voxels + this->OAR_voxels);
-    arrayInit(this->grad_term1_output, this->numBeamlets_max);
-    arrayInit(this->grad_term2_input, this->D_rows_max);
-    arrayInit(this->grad_term2_output, this->numBeamlets_max);
-
-    checkCublas(cublasCreate(&this->cublasHandle));
+    arrayInit(this->grad_term1_output, this->numBeamlets);
+    arrayInit(this->grad_term2_input, this->D_rows);
+    arrayInit(this->grad_term2_output, this->numBeamlets);
 }
 
 IMRT::eval_grad::~eval_grad() {
@@ -513,22 +506,6 @@ IMRT::eval_grad::~eval_grad() {
         checkCudaErrors(cudaStreamDestroy(this->stream4));
     if (this->stream5)
         checkCudaErrors(cudaStreamDestroy(this->stream5));
-    if (this->cublasHandle)
-        cublasDestroy(this->cublasHandle);
-}
-
-void IMRT::eval_grad::resize(size_t numBeamlets_current_, size_t D_rows_current_) {
-    this->numBeamlets_current = numBeamlets_current_;
-    this->D_rows_current = D_rows_current_;
-
-    this->term4.resize(this->D_rows_current);
-    this->prox4.resize(this->D_rows_current);
-    this->sumProx4.resize(this->D_rows_current);
-    this->sumProx4Term4.resize(this->D_rows_current);
-
-    this->grad_term1_output.resize(this->numBeamlets_current);
-    this->grad_term2_input.resize(this->D_rows_current);
-    this->grad_term2_output.resize(this->numBeamlets_current);
 }
 
 
@@ -536,17 +513,18 @@ float IMRT::eval_grad::evaluate(
     const MatCSR64& A, const MatCSR64& ATrans,
     const MatCSR64& D, const MatCSR64& DTrans,
     const array_1d<float>& x, array_1d<float>& grad, float gamma,
-    const cusparseHandle_t& handle,
+    const cusparseHandle_t& handle_cusparse,
+    const cublasHandle_t& handle_cublas,
     
-    float* maxDose,
+    const float* maxDose,
     const float* minDoseTarget,
     const float* minDoseTargetWeights,
     const float* maxWeightsLong,
     const float* OARWeightsLong,
     float eta) {
     #if sanityCheck
-        if (A.numCols != x.size || A.numRows != Ax.size ||
-            D.numCols != x.size || D.numRows != term4.size ||
+        if (A.numCols != x.size || A.numRows != this->Ax.size ||
+            D.numCols != x.size || D.numRows != this->term4.size ||
             x.size != grad.size) {
             std::cerr << "The size of the matrices A, D and the "
                 "size of the input vector x are incompatible." << std::endl;
@@ -554,11 +532,11 @@ float IMRT::eval_grad::evaluate(
         }
     #endif
 
-    checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    checkCusparse(cusparseSpMV(handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
         &this->alpha, A.matA, x.vec, &this->beta, this->Ax.vec, CUDA_R_32F,
         CUSPARSE_SPMV_ALG_DEFAULT, A.d_buffer_spmv));
 
-    checkCusparse(cusparseSpMV(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    checkCusparse(cusparseSpMV(handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
         &this->alpha, D.matA, x.vec, &this->beta, this->term4.vec, CUDA_R_32F,
         CUSPARSE_SPMV_ALG_DEFAULT, D.d_buffer_spmv));
 
@@ -576,9 +554,9 @@ float IMRT::eval_grad::evaluate(
     checkCudaErrors(cudaMemcpyAsync(this->term3.data, this->Ax.data + this->PTV_voxels,
         this->OAR_voxels * sizeof(float), cudaMemcpyDeviceToDevice, this->stream3));
 
-    gridSize.x = (this->D_rows_current + blockSize.x - 1) / blockSize.x;
+    gridSize.x = (this->D_rows + blockSize.x - 1) / blockSize.x;
     d_prox1Norm<<<gridSize, blockSize, 0, this->stream4>>>(
-        this->prox4.data, this->term4.data, gamma, this->D_rows_current);
+        this->prox4.data, this->term4.data, gamma, this->D_rows);
 
     gridSize.x = (this->prox1.size + blockSize.x - 1) / blockSize.x;
     d_ATimesBSquare<<<gridSize, blockSize, 0, this->stream1>>>(
@@ -601,15 +579,15 @@ float IMRT::eval_grad::evaluate(
 
     checkCudaErrors(cudaDeviceSynchronize());
     float sum1, sum2, sum3, sum4, sum5;
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx1.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx1.size,
         this->sumProx1.data, 1, &sum1));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx2.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx2.size,
         this->sumProx2.data, 1, &sum2));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumTerm3.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumTerm3.size,
         this->sumTerm3.data, 1, &sum3));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx4.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx4.size,
         this->sumProx4.data, 1, &sum4));
-    checkCublas(cublasSasum(this->cublasHandle, this->sumProx4Term4.size,
+    checkCublas(cublasSasum(handle_cublas, this->sumProx4Term4.size,
         this->sumProx4Term4.data, 1, &sum5));
 
     
@@ -621,34 +599,34 @@ float IMRT::eval_grad::evaluate(
         this->OAR_voxels, OARWeightsLong, this->term3.data,
         maxWeightsLong, this->prox2.data);
     
-    gridSize.x = (this->D_rows_current + blockSize.x - 1) / blockSize.x;
+    gridSize.x = (this->D_rows + blockSize.x - 1) / blockSize.x;
     d_calc_grad_term2_input<<<gridSize, blockSize, 0, this->stream2>>> (
         this->grad_term2_input.data, this->term4.data,
-        this->prox4.data, eta / gamma, this->D_rows_current);
+        this->prox4.data, eta / gamma, this->D_rows);
 
     checkCudaErrors(cudaDeviceSynchronize());
 
     checkCusparse(cusparseSpMV(
-        handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &this->alpha, ATrans.matA,
-        grad_term1_input.vec, &this->beta, grad_term1_output.vec,
+        handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE, &this->alpha, ATrans.matA,
+        this->grad_term1_input.vec, &this->beta, grad_term1_output.vec,
         CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, ATrans.d_buffer_spmv));
     
     checkCusparse(cusparseSpMV(
-        handle, CUSPARSE_OPERATION_NON_TRANSPOSE, &this->alpha, DTrans.matA,
+        handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE, &this->alpha, DTrans.matA,
         this->grad_term2_input.vec, &this->beta, this->grad_term2_output.vec,
         CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, DTrans.d_buffer_spmv));
     
     checkCudaErrors(cudaDeviceSynchronize());
     
-    gridSize.x = (this->numBeamlets_current + blockSize.x - 1) / blockSize.x;
+    gridSize.x = (this->numBeamlets + blockSize.x - 1) / blockSize.x;
     d_elementWiseAdd<<<gridSize, blockSize>>>
         (grad.data, this->grad_term1_output.data,
-        this->grad_term2_output.data, this->numBeamlets_current);
+        this->grad_term2_output.data, this->numBeamlets);
 
     checkCudaErrors(cudaDeviceSynchronize());
     
-    float result = 0.5f * sum1  +  0.5f * sum2  +  0.5f * sum3
-        +  eta * sum4  +  0.5f / gamma * sum5;
+    float result = 0.5f * (sum1 + sum2 + sum3)
+        +  eta * (sum4 + 0.5f / gamma * sum5);
     return result;
 }
 
@@ -668,7 +646,6 @@ void IMRT::linearComb_array_1d(float alpha, const array_1d<float>& a,
     dim3 gridSize(1, 1, 1);
     gridSize.x = (a.size + blockSize.x - 1) / blockSize.x;
     d_linearComb<<<gridSize, blockSize>>>(c.data, alpha, a.data, beta, b.data, a.size);
-    checkCudaErrors(cudaDeviceSynchronize());
 }
 
 
@@ -730,93 +707,6 @@ bool IMRT::arrayInit_group1(const std::vector<array_1d<float>*>& array_group1,
         array_group1[1]->size * sizeof(float)));
     return 0;
 }
-
-
-bool IMRT::DimensionReduction(const std::vector<uint8_t>& active_beams,
-    const MatReservior& VOIRes, const std::vector<MatCSR_Eigen>& VOIRes_h,
-    const MatReservior& VOIResT, const MatReservior& FGRes, const MatReservior& FGResT,
-    MatCSR64** A, MatCSR64** ATrans, MatCSR64** D, MatCSR64** DTrans,
-    eval_g& operator_eval_g, eval_grad& operator_eval_grad,
-    const std::vector<array_1d<float>*>& array_group1,
-    const std::vector<MatCSR64*>& array_group2,
-    resize_group2& operator_resize_group2,
-    const std::vector<uint8_t>& fluenceArray, int fluenceDim,
-    const cusparseHandle_t& handle
-) {
-    // release old data
-    if (*A != nullptr)
-        delete *A;
-    if (*ATrans != nullptr)
-        delete *ATrans;
-    if (*D != nullptr)
-        delete *D;
-    if (*DTrans != nullptr)
-        delete *DTrans;
-
-    *A = new MatCSR64();
-    *ATrans = new MatCSR64();
-    *D = new MatCSR64();
-    *DTrans = new MatCSR64();
-
-    // update
-    VOIRes.assemble_col_block(**A, VOIRes_h, active_beams);
-    VOIResT.assemble_row_block(**ATrans, active_beams);
-    FGRes.assemble_diag(**D, active_beams);
-    FGResT.assemble_diag(**DTrans, active_beams);
-
-    // calculate the number of active beamlets
-    size_t numBeamlets_current = 0;
-    size_t D_rows_current = 0;
-    for (int i=0; i<active_beams.size(); i++) {
-        if (active_beams[i] == 0)
-            continue;
-        numBeamlets_current += VOIRes.reservior[i].numCols;
-        D_rows_current += FGRes.reservior[i].numRows;
-    }
-
-    // resize the operators
-    operator_eval_g.resize(D_rows_current);
-    operator_eval_grad.resize(numBeamlets_current, D_rows_current);
-    
-    // resize the vectors
-    for (auto* ptr : array_group1)
-        if (ptr->resize(numBeamlets_current)) {
-        return 1;
-    }
-
-    
-    std::vector<float> currentActiveBeamlets(fluenceArray.size(), 0);
-    size_t numBeamletsPerBeam = fluenceDim * fluenceDim;
-    for (size_t i=0; i<active_beams.size(); i++) {
-        if (active_beams[i] == 0)
-            continue;
-        size_t idx_begin = i * numBeamletsPerBeam;
-        size_t idx_end = (i + 1) * numBeamletsPerBeam;
-        for (size_t j=idx_begin; j<idx_end; j++)
-            currentActiveBeamlets[j] = fluenceArray[j] > 0;
-    }
-    array_1d<float> currentActiveBeamlets_device;
-    arrayInit(currentActiveBeamlets_device, currentActiveBeamlets.size());
-    checkCudaErrors(cudaMemcpy(currentActiveBeamlets_device.data, currentActiveBeamlets.data(),
-        currentActiveBeamlets_device.size*sizeof(float), cudaMemcpyHostToDevice));
-    operator_resize_group2.evaluate(array_group2, currentActiveBeamlets_device,
-        active_beams.size(), fluenceDim);
-    
-
-    // allocate buffer
-    array_1d<float> vecX, vecY, vecZ;
-    arrayInit(vecX, (**A).numCols);
-    arrayInit(vecY, (**A).numRows);
-    arrayInit(vecZ, (**D).numRows);
-
-    bufferAllocate(**A, vecX, vecY, handle);
-    bufferAllocate(**ATrans, vecY, vecX, handle);
-    bufferAllocate(**D, vecX, vecZ, handle);
-    bufferAllocate(**DTrans, vecZ, vecX, handle);
-
-    return 0;
-}
-
 
 bool IMRT::bufferAllocate(MatCSR64& target, const array_1d<float>& input,
     const array_1d<float>& output, const cusparseHandle_t& handle) {

@@ -10,7 +10,17 @@ namespace IMRT {
     public:
         ~array_1d();
         bool resize(size_t new_size);
-        array_1d<T>& operator=(const array_1d<T>& other);
+        bool copy(const array_1d<T>& old);
+        friend std::ostream& operator<<(std::ostream& os, const array_1d<T>& obj) {
+            std::vector<T> array_host(obj.size);
+            checkCudaErrors(cudaMemcpy(array_host.data(), obj.data,
+                obj.size*sizeof(T), cudaMemcpyDeviceToHost));
+            for (size_t i=0; i<obj.size; i++)
+                os << array_host[i] << "  ";
+            os << "\n";
+            return os;
+        }
+
         T* data = nullptr;
         cusparseDnVecDescr_t vec = nullptr;
         size_t size = 0;
@@ -79,30 +89,8 @@ namespace IMRT {
         size_t ptv_voxels, size_t oar_voxels, const cusparseHandle_t& handle,
         const cublasHandle_t& cublas_handle);
 
-    class proxL2Onehalf_QL_gpu{
-    public:
-        // the input should be of the maximum nnz,
-        // so that subsequent g0 could only be smaller.
-        bool customInit(const MatCSR64& g0);
-        ~proxL2Onehalf_QL_gpu();
-        bool evaluate(const MatCSR64& g0, const array_1d<float>& beamWeights, float t,
-            MatCSR64& prox, array_1d<float>& nrmnew, const cublasHandle_t& cublas_handle);
-
-        bool initFlag = false;
-        array_1d<float> g0_square_values;
-        array_1d<float> sum_input;
-        array_1d<float> nrm2;
-        array_1d<float> nrm2_sum;
-        array_1d<float> nrm234;
-        array_1d<float> alpha;
-        array_1d<float> sHat;
-        array_1d<float> tHat;
-        array_1d<float> prox_square;
-        array_1d<float> nrm2newbuff;
-        size_t sum_buffer_size = 0;
-        void* sum_buffer = nullptr;
-        cusparseHandle_t handle = nullptr;
-    };
+    // this function calculates tHat from nrm2 in-place.
+    __global__ void d_proxL2Onehalf_calc_tHat(float* buffer, float* tau, size_t size);
 
     class calc_rhs {
     public:
@@ -140,14 +128,17 @@ namespace IMRT {
     // performs c[i] = a[i] * b[i] * t.
     bool elementWiseMul(float* a, float* b, float* c, float t, size_t size);
     __global__ void d_elementWiseMul(float* a, float* b, float* c, float t, size_t size);
-
-    // calculate sHat = (2 / root3) * sin((acos(0.75 * root3 * alpha) + pi / 2) / 3)
-    bool calc_sHat(float* sHat, float* alpha, size_t size);
-    __global__ void d_calc_sHat(float* sHat, float* alpha, size_t size);
     
     bool bufferAllocate(MatCSR64& target, const array_1d<float>& input,
         const array_1d<float>& output, const cusparseHandle_t& handle);
     
+    
+    // performs tHat(alpha > 2 * root6 / 9) = 0; nrm2 is used to tell whether
+    // the alpha element is nan. alpha element is nan when nrm2 is 0.
+    bool tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size);
+    __global__ void d_tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size);
+
+
     // performs tHat(alpha > 2 * root6 / 9) = 0; nrm2 is used to tell whether
     // the alpha element is nan. alpha element is nan when nrm2 is 0.
     bool tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size);
@@ -169,6 +160,10 @@ namespace IMRT {
     // performs source[i] = a * source[i];
     bool elementWiseScale(float* source, float a, size_t size);
     __global__ void d_elementWiseScale(float* source, float a, size_t size);
+
+    // overload, performs target[i] = a * source[i]
+    bool elementWiseScale(float* source, float* target, float a, size_t size);
+    __global__ void d_elementWiseScale(float* source, float* target, float a, size_t size);
 
     // performs target[i] = source[i] > a;
     bool elementWiseGreater(float* source, float* target, float a, size_t size);

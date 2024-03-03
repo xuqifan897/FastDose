@@ -363,5 +363,21 @@ bool IMRT::Eigen2Cusparse(const MatCSR_Eigen& source, MatCSR64& dest) {
     dest.numRows = source.getRows();
     dest.numCols = source.getCols();
     dest.nnz = source.getNnz();
+
+    // allocate buffer
+    size_t bufferSize;
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    array_1d<float> input, output;
+    arrayInit(input, dest.numCols);
+    arrayInit(output, dest.numRows);
+    cusparseHandle_t handle_cusparse;
+    checkCusparse(cusparseCreate(&handle_cusparse));
+    checkCusparse(cusparseSpMV_bufferSize(
+        handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, dest.matA, input.vec, &beta, output.vec,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
+    checkCudaErrors(cudaMalloc((void**)&dest.d_buffer_spmv, bufferSize));
+
     return 0;
 }

@@ -5,6 +5,7 @@
 #include "IMRTInit.cuh"
 #include "IMRTDoseMat.cuh"
 #include "IMRTOptimize_var.cuh"
+#include <Eigen/Dense>
 
 #define SHOW_VAR(obj, var) viewArray(obj, var, __FILE__, __LINE__)
 #define BOO_IMRT_DEBUG true
@@ -49,9 +50,17 @@ namespace IMRT {
     // + sum_{i=0}^{numOars} 0.5 * alpha_i || (A_i x - d_vecs{i})_+ ||_2^2
     // + sum_{i=1}^{numOars} 0.5 * beta_i || A_i x ||_2^2 + eta || Dx ||_1^gamma
     // subject to x >= 0
-    bool BOO_IMRT_L2OneHalf_cpu_QL(MatCSR64& A, MatCSR64& ATrans,
-        MatCSR64& D, MatCSR64& DTrans, const Weights_d& weights_d,
-        const Params& params, const std::vector<uint8_t>& fluenceArray);
+    bool BOO_IMRT_L2OneHalf_gpu_QL (
+        const MatCSR64& A, const MatCSR64& ATrans,
+        const MatCSR64& D, const MatCSR64& DTrans,
+        // parameters
+        const array_1d<float>& beamWeights, const array_1d<float>& maxDose,
+        const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
+        const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
+        size_t numBeamletsPerBeam, float gamma, float eta,
+        // variable
+        int& k_global, int iters_global, int iters_local, float& theta_km1, float& tkm1,
+        array_1d<float>& xkm1, array_1d<float>& vkm1, MatCSR64& x2d, MatCSR64& x2dprox);
 
     bool BOO_IMRT_L2OneHalf_gpu_QL(
         const std::vector<MatCSR_Eigen>& VOIMatrices,
@@ -67,7 +76,17 @@ namespace IMRT {
         std::vector<int>& activeBeams,
         std::vector<float>& activeNorms,
         std::vector<std::pair<int, std::vector<int>>>& topN);
-        
+
+    bool BOO_IMRT_L2OneHalf_gpu_QL (
+        const MatCSR64& A, const MatCSR64& ATrans,
+        const MatCSR64& D, const MatCSR64& DTrans,
+        // parameters
+        const array_1d<float>& beamWeights, const array_1d<float>& maxDose,
+        const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
+        const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
+        Params& params, int iterations, size_t numBeamletsPerBeam, bool first_opt,
+        // variable
+        array_1d<float>& xkm1, MatCSR64& x2d, MatCSR64& x2dprox) ;
 
     class Weights_d {
     public:
@@ -84,16 +103,15 @@ namespace IMRT {
 
     class eval_g {
     public:
-        eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows_max);
+        eval_g(size_t ptv_voxels, size_t oar_voxels, size_t d_rows);
         ~eval_g();
-        // adapt to the changing dimension
-        void resize(size_t D_rows_current_);
         // assume the handle and the stream are bound
         float evaluate(const MatCSR64& A, const MatCSR64& D,
             const array_1d<float>& x, float gamma,
             const cusparseHandle_t& handle,
+            const cublasHandle_t& handle_cublas,
             
-            float* maxDose,
+            const float* maxDose,
             const float* minDoseTarget,
             const float* minDoseTargetWeights,
             const float* maxWeightsLong,
@@ -102,8 +120,7 @@ namespace IMRT {
     private:
         size_t PTV_voxels;
         size_t OAR_voxels;
-        size_t D_rows_max;
-        size_t D_rows_current;
+        size_t D_rows;
         float alpha;
         float beta;
 
@@ -125,11 +142,10 @@ namespace IMRT {
         array_1d<float> sumTerm3;
         array_1d<float> sumProx4;
         array_1d<float> sumProx4Term4;
-
-        cublasHandle_t cublasHandle = nullptr;
     };
 
     bool arrayInit(array_1d<float>& arr, size_t size);
+    bool arrayInit(array_1d<float>& arr, const Eigen::VectorXf& source);
     void arrayRand01(array_1d<float>& arr);
 
     __global__ void
@@ -152,15 +168,15 @@ namespace IMRT {
     class eval_grad {
     public:
         eval_grad(size_t ptv_voxels, size_t oar_voxels,
-            size_t numBeamlets_max_, size_t d_rows_max_);
+            size_t d_rows, size_t num_beamlets);
         ~eval_grad();
-        void resize(size_t numBeamlets_current_, size_t D_rows_current_);
         float evaluate(const MatCSR64& A, const MatCSR64& ATrans,
             const MatCSR64& D, const MatCSR64& DTrans,
             const array_1d<float>& x, array_1d<float>& grad, float gamma,
-            const cusparseHandle_t& handle,
+            const cusparseHandle_t& handle_cusparse,
+            const cublasHandle_t& handle_cublas,
             
-            float* maxDose,
+            const float* maxDose,
             const float* minDoseTarget,
             const float* minDoseTargetWeights,
             const float* maxWeightsLong,
@@ -169,10 +185,8 @@ namespace IMRT {
     private:
         size_t PTV_voxels;
         size_t OAR_voxels;
-        size_t numBeamlets_max;
-        size_t numBeamlets_current;
-        size_t D_rows_max;
-        size_t D_rows_current;
+        size_t D_rows;
+        size_t numBeamlets;
         float alpha;
         float beta;
 
@@ -199,8 +213,6 @@ namespace IMRT {
         array_1d<float> grad_term1_output;
         array_1d<float> grad_term2_input;
         array_1d<float> grad_term2_output;
-
-        cublasHandle_t cublasHandle = nullptr;
     };
 
     // performs a = b
@@ -249,23 +261,30 @@ namespace IMRT {
 
     bool arrayToMatScatter(const array_1d<float>& source, MatCSR64& target);
 
-    // this function resizes the matrices and vectors according to the active beams
-    bool DimensionReduction(const std::vector<uint8_t>& active_beams,
-        const MatReservior& VOIRes, const std::vector<MatCSR_Eigen>& VOIRes_h,
-        const MatReservior& VOIResT, const MatReservior& FGRes, const MatReservior& FGResT,
-        MatCSR64** A, MatCSR64** ATrans, MatCSR64** D, MatCSR64** DTrans,
-        eval_g& operator_eval_g, eval_grad& operator_eval_grad,
-        const std::vector<array_1d<float>*>& array_group1,
-        const std::vector<MatCSR64*>& array_group2,
-        resize_group2& operator_resize_group2,
-        const std::vector<uint8_t>& fluenceArray, int fluenceDim,
-        const cusparseHandle_t& handle);
-
     // this function performs the element-wise operation: target[i] = max(target[i], value);
     bool elementWiseMax(MatCSR64& target, float value);
     __global__ void d_elementWiseMax(float* target, float value, size_t size);
 
     bool assignmentTest();
+
+    class proxL2Onehalf_QL_gpu{
+    public:
+        // the input should be of the maximum nnz,
+        // so that subsequent g0 could only be smaller.
+        bool customInit(const MatCSR64& g0, const cusparseHandle_t& handle_cusparse);
+        bool evaluate(const MatCSR64& g0, const array_1d<float>& tau,
+            MatCSR64& prox, array_1d<float>& nrmnew,
+            const cusparseHandle_t& handle_cusparse);
+    
+    private:
+        size_t numRows;
+        size_t numCols;
+        size_t nnz;
+        dim3 gridSize, blockSize;
+        MatCSR64 g02;  // g0 square
+        array_1d<float> sum_arr;  // used to sum over the rows
+        array_1d<float> buffer;  // dimension equals the number of rows
+    };
 }
 #define sanityCheck true
 

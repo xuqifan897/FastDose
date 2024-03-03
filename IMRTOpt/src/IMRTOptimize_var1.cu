@@ -1,5 +1,10 @@
 #include "IMRTOptimize.cuh"
 
+#define TWO_OVER_ROOT3 1.1547005383792517f
+#define THREE_QUARTERS_ROOT3 1.299038105676658f
+#define PI_OVER_TWO 1.5707963267948966f
+#define TWO_TIMES_ROOT6_OVER_NINE 0.5443310539518174f
+
 template<class T>
 IMRT::array_1d<T>::~array_1d() {
     if (this->data != nullptr) {
@@ -27,30 +32,16 @@ bool IMRT::array_1d<T>::resize(size_t new_size) {
 }
 
 template <class T>
-IMRT::array_1d<T>& IMRT::array_1d<T>::operator=(const IMRT::array_1d<T>& other) {
-    if (this != &other) {  // Avoid self-assignment
-        if (this->size == other.size) {
-            // of the same size, no need to allocate memory
-            checkCudaErrors(cudaMemcpy(this->data, other.data,
-                other.size*sizeof(float), cudaMemcpyDeviceToDevice));
-            if (other.vec != nullptr && this->vec == nullptr)
-                checkCusparse(cusparseCreateDnVec(&this->vec, this->size, this->data, CUDA_R_32F));
-        } else {
-            if (this->vec != nullptr)
-                checkCusparse(cusparseDestroyDnVec(this->vec));
-            if (this->data != nullptr)
-                checkCudaErrors(cudaFree(this->data));
-            
-            this->size = other.size;
-            checkCudaErrors(cudaMalloc((void**)&this->data, this->size*sizeof(float)));
-            checkCudaErrors(cudaMemcpy(this->data, other.data,
-                this->size*sizeof(float), cudaMemcpyDeviceToDevice));
-            if (other.vec != nullptr)
-                checkCusparse(cusparseCreateDnVec(&this->vec, this->size, this->data, CUDA_R_32F));
-        }
+bool IMRT::array_1d<T>::copy(const IMRT::array_1d<T>& old) {
+    if (this->size != old.size) {
+        std::cerr << "Size unmatch in function array_1d<T>::copy" << std::endl;
+        return 1;
     }
-    return *this;
+    checkCudaErrors(cudaMemcpy(this->data, old.data,
+        this->size*sizeof(T), cudaMemcpyDeviceToDevice));
+    return 0;
 }
+
 
 template class IMRT::array_1d<float>;
 template class IMRT::array_1d<uint8_t>;
@@ -308,54 +299,6 @@ __global__ void IMRT::d_elementWiseMul(
     c[idx] = a[idx] * b[idx] * t;
 }
 
-bool IMRT::calc_sHat(float* sHat, float* alpha, size_t size) {
-    dim3 blockSize(64, 1, 1);
-    dim3 gridSize(1, 1, 1);
-    gridSize.x = (size + blockSize.x - 1) / blockSize.x;
-    d_calc_sHat<<<gridSize, blockSize>>>(sHat, alpha, size);
-    return 0;
-}
-
-__global__ void IMRT::d_calc_sHat(float* sHat, float* alpha, size_t size) {
-    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
-    if (idx >= size)
-        return;
-    
-#define TWO_OVER_ROOT3 1.1547005383792517f
-#define THREE_QUARTERS_ROOT3 1.299038105676658f
-#define PI_OVER_TWO 1.5707963267948966f
-    
-    float input_value = alpha[idx];
-    float output_value = TWO_OVER_ROOT3 * sinf((acosf(THREE_QUARTERS_ROOT3
-        * input_value) + PI_OVER_TWO) / 3);
-    sHat[idx] = output_value;
-
-#undef PI_OVER_TWO
-#undef THREE_QUARTERS_ROOT3
-#undef TWO_OVER_ROOT3
-}
-
-bool IMRT::tHat_step2(float* tHat, float* alpha, float* nrm2, size_t size) {
-    dim3 blockSize(64, 1, 1);
-    dim3 gridSize(1, 1, 1);
-    gridSize.x = (size + blockSize.x - 1) / blockSize.x;
-    d_tHat_step2<<<gridSize, blockSize>>>(tHat, alpha, nrm2, size);
-    return 0;
-}
-
-__global__ void IMRT::d_tHat_step2(
-    float* tHat, float* alpha, float* nrm2, size_t size) {
-    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
-    if (idx >= size)
-        return;
-#define TWO_TIMES_ROOT6_OVER_NINE 0.5443310539518174f
-    float alpha_value = alpha[idx];
-    float nrm2_value = nrm2[idx];
-    if (nrm2_value < 1e-4f || alpha_value > TWO_TIMES_ROOT6_OVER_NINE)
-        tHat[idx] = 0.0f;
-#undef TWO_TIMES_ROOT6_OVER_NINE
-}
-
 bool IMRT::calc_prox_tHat_g0(
     size_t numRows, size_t numCols, size_t nnz,
     float* tHat, size_t* g0_offsets, size_t* g0_columns,
@@ -417,6 +360,22 @@ __global__ void IMRT::d_elementWiseScale(
     source[idx] = source[idx] * a;
 }
 
+bool IMRT::elementWiseScale(float* source, float* target, float a, size_t size) {
+    dim3 blockSize(64, 1, 1);
+    dim3 gridSize(1, 1, 1);
+    gridSize.x = (size + blockSize.x - 1) / blockSize.x;
+    d_elementWiseScale<<<gridSize, blockSize>>>(source, target, a, size);
+    return 0;
+}
+
+__global__ void IMRT::d_elementWiseScale(
+    float* source, float* target, float a, size_t size) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+    if (idx >= size)
+        return;
+    target[idx] = source[idx] * a;
+}
+
 bool IMRT::elementWiseGreater(float* source,
     float* target, float a, size_t size) {
     dim3 blockSize(64, 1, 1);
@@ -448,120 +407,121 @@ bool IMRT::beamSort(const std::vector<float>& beamNorms_h,
     return 0;
 }
 
-bool IMRT::proxL2Onehalf_QL_gpu::customInit(const MatCSR64& g0) {
-    // In here, we assume the input g0 has the maximum nnz
-    arrayInit(this->g0_square_values, g0.nnz);
-    arrayInit(this->sum_input, g0.numCols);
-    arrayInit(this->nrm2, g0.numRows);
-    arrayInit(this->nrm2_sum, g0.numRows);
-    arrayInit(this->nrm234, g0.numRows);
-    arrayInit(this->alpha, g0.numRows);
-    arrayInit(this->sHat, g0.numRows);
-    arrayInit(this->tHat, g0.numRows);
-    arrayInit(this->prox_square, g0.nnz);
-    arrayInit(this->nrm2newbuff, g0.numRows);
-    checkCusparse(cusparseCreate(&this->handle));
-    this->initFlag = true;
+bool IMRT::proxL2Onehalf_QL_gpu::customInit(const MatCSR64& g0,
+    const cusparseHandle_t& handle_cusparse) {
+    // this->g02 should be of the same sparsity pattern as g0
+    this->numRows = g0.numRows;
+    this->numCols = g0.numCols;
+    this->nnz = g0.nnz;
+    this->blockSize = dim3(64, 1, 1);
+    this->gridSize = dim3((this->numRows + blockSize.x - 1) / blockSize.x, 1, 1);
+    checkCudaErrors(cudaMalloc((void**)&(this->g02.d_csr_offsets),
+        (this->numRows+1)*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&(this->g02.d_csr_columns), this->nnz*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&(this->g02.d_csr_values), this->nnz*sizeof(float)));
+    
+    checkCudaErrors(cudaMemcpy(this->g02.d_csr_offsets, g0.d_csr_offsets,
+        (this->numRows+1)*sizeof(size_t), cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(this->g02.d_csr_columns, g0.d_csr_columns,
+        this->nnz * sizeof(size_t), cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(this->g02.d_csr_values, g0.d_csr_values,
+        this->nnz * sizeof(float), cudaMemcpyDeviceToDevice));
 
-    // set the values of this->sum_input
-    std::vector<float> sum_input_host(g0.numCols, 1.0f);
-    checkCudaErrors(cudaMemcpy(this->sum_input.data, sum_input_host.data(),
-        g0.numCols * sizeof(float), cudaMemcpyHostToDevice));
-    return 0;
-}
-
-
-IMRT::proxL2Onehalf_QL_gpu::~proxL2Onehalf_QL_gpu() {
-    if (this->handle != nullptr) {
-        checkCusparse(cusparseDestroy(this->handle));
-    }
-    if (this->sum_buffer != nullptr) {
-        checkCudaErrors(cudaFree(this->sum_buffer));
-    }
-}
-
-
-bool IMRT::proxL2Onehalf_QL_gpu::evaluate(
-    const MatCSR64& g0, const array_1d<float>& beamWeights, float t,
-    MatCSR64& prox, array_1d<float>& nrmnew, const cublasHandle_t& cublas_handle) {
-    elementWiseSquare(g0.d_csr_values, this->g0_square_values.data, g0.nnz);
-    // for safety concerns, synchronize between the cuda kernels and cusparse APIs
-    checkCudaErrors(cudaDeviceSynchronize());
-
-    // construct a temporary sparse matrix that stores g0_square,
-    // with the same sparsity pattern as g0
-    cusparseSpMatDescr_t g0_2_mat = nullptr;
+    this->g02.numRows = this->numRows;
+    this->g02.numCols = this->numCols;
+    this->g02.nnz = this->nnz;
     checkCusparse(cusparseCreateCsr(
-        &g0_2_mat, g0.numRows, g0.numCols, g0.nnz,
-        g0.d_csr_offsets, g0.d_csr_columns, this->g0_square_values.data,
+        &(this->g02.matA), this->numRows, this->numCols, this->nnz,
+        this->g02.d_csr_offsets, this->g02.d_csr_columns, this->g02.d_csr_values,
         CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+    
+    arrayInit(this->sum_arr, this->numCols);
+    std::vector<float> sum_arr_host(this->numCols, 1.0f);
+    checkCudaErrors(cudaMemcpy(this->sum_arr.data, sum_arr_host.data(),
+        this->numCols*sizeof(float), cudaMemcpyHostToDevice));
+    arrayInit(this->buffer, this->numRows);
 
-    float alpha = 1.0f;
-    float beta = 0.0f;
-
+    // initialize the multiplication buffer of g02
+    float alpha = 1.0f, beta = 0.0f;
     size_t bufferSize = 0;
     checkCusparse(cusparseSpMV_bufferSize(
-        this->handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        &alpha, g0_2_mat, this->sum_input.vec, &beta, this->nrm2.vec,
+        handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, this->g02.matA, this->sum_arr.vec, &beta, this->buffer.vec,
         CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
-    if (this->sum_buffer_size < bufferSize) {
-        this->sum_buffer_size =  bufferSize;
-        if (this->sum_buffer != nullptr)
-            checkCudaErrors(cudaFree(this->sum_buffer));
-        checkCudaErrors(cudaMalloc(&this->sum_buffer, bufferSize));
-    }
-
-    checkCusparse(cusparseSpMV(
-        this->handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        &alpha, g0_2_mat, this->sum_input.vec, &beta, this->nrm2.vec,
-        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, this->sum_buffer));
-
-    elementWisePower(this->nrm2.data, this->nrm234.data, -0.75f, this->nrm2.size);
-    
-    elementWiseMul(beamWeights.data, this->nrm234.data,
-        this->alpha.data, t, this->alpha.size);
-    
-    calc_sHat(this->sHat.data, this->alpha.data, this->alpha.size);
-
-    elementWiseSquare(this->sHat.data, this->tHat.data, this->sHat.size);
-
-    tHat_step2(this->tHat.data, this->alpha.data, this->nrm2.data, this->tHat.size);
-
-    if (g0.numRows != prox.numRows || g0.numCols != prox.numCols
-        || g0.nnz != prox.nnz) {
-        std::cerr << "The input matrices g0 and prox are supposed "
-            "to be of the same sparsity pattern" << std::endl;
-        return 1;
-    }
-    calc_prox_tHat_g0(g0.numRows, g0.numCols, g0.nnz,
-        this->tHat.data, g0.d_csr_offsets, g0.d_csr_columns, g0.d_csr_values,
-        prox.d_csr_values);
-    
-    elementWiseSquare(prox.d_csr_values, this->prox_square.data, prox.nnz);
-    // for safety concerns, synchronize between the cuda kernels and cusparse APIs
-    checkCudaErrors(cudaDeviceSynchronize());
-
-    // construct a temporary cusparseSpMatDescr_t class.
-    cusparseSpMatDescr_t prox_square_matA;
-    checkCusparse(cusparseCreateCsr(
-        &prox_square_matA, g0.numRows, g0.numCols, g0.nnz,
-        g0.d_csr_offsets, g0.d_csr_columns, this->prox_square.data,
-        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
-    checkCusparse(cusparseSpMV(
-        this->handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        &alpha, prox_square_matA, this->sum_input.vec, &beta, this->nrm2newbuff.vec,
-        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, this->sum_buffer));
-
-    if (nrmnew.size != g0.numRows) {
-        std::cerr << "The size of nrmnew should match g0.numRows." << std::endl;
-        return 1;
-    }
-    elementWiseSqrt(this->nrm2newbuff.data, nrmnew.data, nrmnew.size);
-
-    checkCusparse(cusparseDestroySpMat(g0_2_mat));
-    checkCusparse(cusparseDestroySpMat(prox_square_matA));
+    checkCudaErrors(cudaMalloc(&this->g02.d_buffer_spmv, bufferSize));
     return 0;
 }
+
+bool IMRT::proxL2Onehalf_QL_gpu::evaluate(
+    const MatCSR64& g0, const array_1d<float>& tau,
+    MatCSR64& prox, array_1d<float>& nrmnew,
+    const cusparseHandle_t& handle_cusparse) {
+    // calculate this->g02
+    elementWiseSquare(g0.d_csr_values, this->g02.d_csr_values, g0.nnz);
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    // calculate nrm2 = sum(g0.^2, 1) = sum(this->g02, 1);
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    checkCusparse(cusparseSpMV(
+        handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, this->g02.matA, this->sum_arr.vec, &beta, this->buffer.vec,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, this->g02.d_buffer_spmv));
+
+    checkCudaErrors(cudaDeviceSynchronize());
+    d_proxL2Onehalf_calc_tHat<<<this->gridSize, this->blockSize>>>(
+        this->buffer.data, tau.data, this->numRows);
+    
+    // calculate prox
+    calc_prox_tHat_g0(this->numRows, this->numCols, this->nnz,
+        this->buffer.data, g0.d_csr_offsets, g0.d_csr_columns,
+        g0.d_csr_values, prox.d_csr_values);
+    
+    // calculate prox square. As this->g02 is no longer needed,
+    // we use it to store the results.
+    elementWiseSquare(prox.d_csr_values, this->g02.d_csr_values, this->nnz);
+    checkCudaErrors(cudaDeviceSynchronize());
+    checkCusparse(cusparseSpMV(
+        handle_cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE,
+        &alpha, this->g02.matA, this->sum_arr.vec, &beta, this->buffer.vec,
+        CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, this->g02.d_buffer_spmv));
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    // calculate nrmnew
+    elementWiseSqrt(this->buffer.data, nrmnew.data, this->numRows);
+    checkCudaErrors(cudaDeviceSynchronize());
+    return 0;
+}
+
+
+__global__ void IMRT::d_proxL2Onehalf_calc_tHat(float* buffer, float* tau, size_t size) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+    if (idx >= size)
+        return;
+    
+    float tau_value = tau[idx];
+    float nrm2_value = buffer[idx];
+    // for arithmatic stability, clamp on nrm2_value
+    float nrm234_value = 1008611.0f;  // assign a dummy value.
+    if (nrm2_value > eps_fastdose)
+        nrm234_value = powf(nrm2_value, -0.75f);
+
+    float alpha_value = tau_value * nrm234_value;
+    if (alpha_value > TWO_TIMES_ROOT6_OVER_NINE) {
+        buffer[idx] = 0.0f;
+        return;
+    }
+
+    float source_value  = alpha_value;
+    source_value *= THREE_QUARTERS_ROOT3;
+    source_value = acosf(source_value);
+    source_value += PI_OVER_TWO;
+    source_value /= 3.0f;
+    source_value = std::sin(source_value);
+    source_value *= TWO_OVER_ROOT3;  // sHat
+    buffer[idx] = source_value * source_value;  // tHat
+}
+
 
 IMRT::calc_rhs::calc_rhs() {
     this->firstTerm.vec = nullptr;

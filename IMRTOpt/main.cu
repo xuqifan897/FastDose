@@ -114,11 +114,11 @@ int main(int argc, char** argv) {
     std::vector<int> activeBeams;
     std::vector<float> activeNorms;
     std::vector<std::pair<int, std::vector<int>>> topN;
-    if (IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
-        VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
-        weights_h, params, fluenceArray,
-        xFull, costs, activeBeams, activeNorms, topN)) {
-        std::cerr << "Beam orientation optimization error." << std::endl;
-        return 1;
-    }
+    // if (IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
+    //     VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
+    //     weights_h, params, fluenceArray,
+    //     xFull, costs, activeBeams, activeNorms, topN)) {
+    //     std::cerr << "Beam orientation optimization error." << std::endl;
+    //     return 1;
+    // }
 }
