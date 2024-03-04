@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     IMRT::randomize_VectorXf(maxWeightsLong);
     IMRT::randomize_VectorXf(OARWeightsLong);
 
-    if (false) {
+    if (true) {
         // optimize using CPU
         IMRT::Optimize_Eigen(numBeams, numBeamletsPerBeam,
             ptv_voxels, oar_voxels, d_rows_current,

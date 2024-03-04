@@ -425,12 +425,17 @@ bool IMRT::Optimize_Eigen(size_t numBeams, size_t numBeamletsPerBeam,
         xkm1 = x;
         vkm1 = v;
 
-        float loss = gx + (nrm.array() * beamWeights.array()).sum();
+        float loss = gx + (beamWeights.array() * nrm.array().sqrt()).sum();
         #if true
+        // for debug purposes
             std::cout << "Iteration: " << k << ", t:" << std::scientific << t
                 << ", loss: " << loss << std::endl;
         #endif
     }
-    std::cout << "Result:\n" << x2d << std::endl;
+    #if true
+    // for debug purposes
+        std::cout << "End of optimization CPU\ngx:" << gx << "\nnrm:\n\n"
+            << nrm.transpose() << "\n\n" << "x:\n" << x.transpose() << std::endl;
+    #endif
     return 0;
 }
