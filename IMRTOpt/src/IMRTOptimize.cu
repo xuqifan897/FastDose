@@ -17,10 +17,12 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
     const array_1d<float>& beamWeights, const array_1d<float>& maxDose,
     const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
     const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
-    size_t numBeamletsPerBeam, float gamma, float eta,
+    size_t numBeamletsPerBeam, float gamma, float eta, int showTrigger,
     // variable
     int& k_global, int iters_global, int iters_local, float& theta_km1, float& tkm1,
-    array_1d<float>& xkm1, array_1d<float>& vkm1, MatCSR64& x2d, MatCSR64& x2dprox
+    array_1d<float>& xkm1, array_1d<float>& vkm1, MatCSR64& x2d, MatCSR64& x2dprox,
+    // for result logging
+    std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu
 ) {    
     size_t ptv_voxels = minDoseTarget.size;
     size_t oar_voxels = OARWeightsLong.size;
@@ -120,16 +122,195 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
         // cost = cost + gx
         cost += gx;
 
-        #if true
-        // for debug purposes
-            std::cout << "Iteration: " << k_global << ", t: " << std::scientific << t
-                << ", loss: " << cost << std::endl;
-        #endif
+        loss_cpu[k_global] = cost;
+        
+        if ((k_global + 1) % showTrigger == 0) {
+            std::cout << "Iteration: " << k_global << ", cost: " << cost
+                << ", t: " << t << std::endl;
+        }
     }
-    #if true
+    if (nrm_cpu.size() != nrm.size) {
+        std::cerr << "nrm_cpu size is supposed to be equal to nrm size." << std::endl;
+        return 1;
+    }
+    checkCudaErrors(cudaMemcpy(nrm_cpu.data(), nrm.data,
+        numBeams*sizeof(float), cudaMemcpyDeviceToHost));
+    #if false
     // for debug purposes
         std::cout << "End of optimization GPU\ngx:" << gx << "\nnrm:\n\n" << nrm << "\n\n"
             << "x:\n" << x << std::endl;
+    #endif
+    return 0;
+}
+
+
+bool IMRT::BeamOrientationOptimization(
+    const std::vector<MatCSR_Eigen>& VOIMatrices,
+    const std::vector<MatCSR_Eigen>& VOIMatricesT,
+    const std::vector<MatCSR_Eigen>& SpFluenceGrad,
+    const std::vector<MatCSR_Eigen>& SpFluenceGradT,
+    const Weights_h& weights_h, const Params& params_h, std::vector<uint8_t> fluenceArray, 
+    std::vector<float>& xFull, std::vector<float>& costs, std::vector<int>& activeBeams,
+    std::vector<float>& activeNorms, std::vector<std::pair<int, std::vector<int>>>& topN
+) {
+    // firstly, we ignore the dimension reduction
+    size_t numBeams = VOIMatrices.size();
+    if (VOIMatricesT.size() != numBeams ||
+        SpFluenceGrad.size() != numBeams ||
+        SpFluenceGradT.size() != numBeams) {
+        std::cerr << "The sizes of VOIMatrices, VOIMatricesT, SpFluenceGrad, "
+            "SpFluenceGradT should be equal" << std::endl;
+        return 1;
+    }
+
+    #if slicingTiming
+        auto time0 = std::chrono::high_resolution_clock::now();
+    #endif
+    // Coaleasing beam-wise matrices
+    MatCSR_Eigen A_Eigen, ATrans_Eigen, D_Eigen, DTrans_Eigen;
+    if (parallelMatCoalease(A_Eigen, ATrans_Eigen, VOIMatrices, VOIMatricesT)) {
+        std::cerr << "Error coaleasing the beam-wise dose loading matrices "
+            "into a single matrix." << std::endl;
+        return 1;
+    }
+    std::vector<MatCSR_Eigen*> SpFluenceGrad_ptr(numBeams, nullptr);
+    std::vector<MatCSR_Eigen*> SpFluenceGradT_ptr(numBeams, nullptr);
+    for (size_t i=0; i<numBeams; i++) {
+        SpFluenceGrad_ptr[i] = (MatCSR_Eigen*)&SpFluenceGrad[i];
+        SpFluenceGradT_ptr[i] = (MatCSR_Eigen*)&SpFluenceGradT[i];
+    }
+    if (diagBlock(D_Eigen, SpFluenceGrad_ptr) ||
+        diagBlock(DTrans_Eigen, SpFluenceGradT_ptr)) {
+        std::cerr << "Error coaleasing the beam-wise fluence map gradient operators "
+            "into a single matrix" << std::endl;
+        return 1;
+    }
+    #if slicingTiming
+        auto time1 = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(time1 - time0);
+        std::cout << "Coaleasing beam-wise matrices time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+    // Loading CPU matrices to GPU
+    MatCSR64 A, ATrans, D, DTrans;
+    if (Eigen2Cusparse(A_Eigen, A) || Eigen2Cusparse(ATrans_Eigen, ATrans) ||
+        Eigen2Cusparse(D_Eigen, D) || Eigen2Cusparse(DTrans_Eigen, DTrans)) {
+        std::cerr << "Error loading CPU matrices to GPU" << std::endl;
+        return 1;
+    }
+    #if slicingTiming
+        auto time2 = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(time2 - time1);
+        std::cout << "Loading CPU matrices to GPU time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+    // prepare beam weights
+    std::vector<float> beamWeightsInit(numBeams, 0.0f);
+    beamWeightsInit_func(VOIMatrices, beamWeightsInit,
+        weights_h.voxels_PTV, weights_h.voxels_OAR);
+    for (size_t i=0; i<numBeams; i++)
+        beamWeightsInit[i] *= params_h.beamWeight;
+    array_1d<float> beamWeights;
+    arrayInit(beamWeights, numBeams);
+    checkCudaErrors(cudaMemcpy(beamWeights.data, beamWeightsInit.data(),
+        numBeams*sizeof(float), cudaMemcpyHostToDevice));
+
+    #if false
+    // for debug purposes
+        std::cout << "Beam weights:\n";
+        for (size_t i=0; i<numBeams; i++)
+            std::cout << beamWeightsInit[i] << "  ";
+        std::cout << std::endl;
+    #endif
+
+    // prepare other weights
+    array_1d<float> maxDose, minDoseTarget,
+        minDoseTargetWeights, maxWeightsLong, OARWeightsLong;
+    std::vector<array_1d<float>*> weight_targets{&maxDose, &minDoseTarget,
+        &minDoseTargetWeights, &maxWeightsLong, &OARWeightsLong};
+    std::vector<const std::vector<float>*> weight_sources{&weights_h.maxDose,
+        &weights_h.minDoseTarget, &weights_h.minDoseTargetWeights,
+        &weights_h.maxWeightsLong, &weights_h.OARWeightsLong};
+    for (int i=0; i<weight_targets.size(); i++) {
+        array_1d<float>& target = *weight_targets[i];
+        const std::vector<float>& source = *weight_sources[i];
+        size_t local_size = source.size();
+        arrayInit(target, local_size);
+        checkCudaErrors(cudaMemcpy(target.data, source.data(),
+            local_size*sizeof(float), cudaMemcpyHostToDevice));
+    }
+    #if slicingTiming
+        auto time3 = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(time3-time2);
+        std::cout << "Weights initialization time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+    // optimization parameters
+    std::vector<float> loss_cpu(params_h.maxIter);
+    std::vector<float> nrm_cpu(numBeams);
+    size_t numBeamlets = A_Eigen.getCols();
+    int k_global = 0;
+    float theta_km1, tkm1=params_h.stepSize;
+    array_1d<float> xkm1, vkm1;
+    arrayInit(xkm1, numBeamlets);
+    arrayInit(vkm1, numBeamlets);
+    arrayRand01(xkm1);
+    vkm1.copy(xkm1);
+
+    // x2d and x2dprox
+    if (fluenceArray.size() % numBeams != 0) {
+        std::cerr << "fluenceArray size should be a multiple of numBeams." << std::endl;
+        return 1;
+    }
+    size_t numBeamletsPerBeam = fluenceArray.size() / numBeams;
+    Eigen::Matrix<float, -1, -1, Eigen::RowMajor>
+        x2d_dense_host(numBeams, numBeamletsPerBeam);
+    for (size_t i=0; i<numBeams; i++) {
+        size_t offset_j = i * numBeamletsPerBeam;
+        for (size_t j=0; j<numBeamletsPerBeam; j++) {
+            x2d_dense_host(i, j) = fluenceArray[offset_j + j] > 0;
+        }
+    }
+    Eigen::SparseMatrix<float, Eigen::RowMajor, EigenIdxType>
+        x2d_Eigen = x2d_dense_host.sparseView().pruned();
+    MatCSR_Eigen* x2d_sparse = (MatCSR_Eigen*)&x2d_Eigen;
+    #if false
+    // for debug purposes
+        std::cout << "x2d_sparse (rows, cols, nnz) = (" << x2d_sparse->getRows()
+            << ", " << x2d_sparse->getCols() << ", " << x2d_sparse->getNnz() << ")" << std::endl;
+    #endif
+    MatCSR64 x2d, x2dprox;
+    Eigen2Cusparse(*x2d_sparse, x2d);
+    Eigen2Cusparse(*x2d_sparse, x2dprox);
+    #if slicingTiming
+        auto time4 = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(time4 - time3);
+        std::cout << "Variables initialization time elapsed: "\
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+    // begin optimization
+    std::cout << std::scientific << "\n\nOptimization starts." << std::endl;
+    if (BOO_IMRT_L2OneHalf_gpu_QL(
+        A, ATrans, D, DTrans,
+        beamWeights, maxDose, minDoseTarget, minDoseTargetWeights,
+        maxWeightsLong, OARWeightsLong, numBeamletsPerBeam,
+        params_h.gamma, params_h.eta, 1,
+        k_global, params_h.maxIter, params_h.maxIter, theta_km1, tkm1,
+        xkm1, vkm1, x2d, x2dprox,
+        loss_cpu, nrm_cpu)) {
+        std::cerr << "BOO_IMRT_L2OneHalf_gpu_QL error." << std::endl;
+        return 1;
+    }
+    std::cout << "\n\nOptimization finished." << std::endl;
+    #if slicingTiming
+        auto time5 = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(time5 - time4);
+        std::cout << "Optimization iterations: " << params_h.maxIter << ", time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
     #endif
     return 0;
 }

@@ -121,4 +121,11 @@ int main(int argc, char** argv) {
     //     std::cerr << "Beam orientation optimization error." << std::endl;
     //     return 1;
     // }
+    if (IMRT::BeamOrientationOptimization(
+        VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
+        weights_h, params, fluenceArray, xFull, costs, activeBeams,
+        activeNorms, topN)) {
+        std::cerr << "Beam orientation optimization error." << std::endl;
+        return 1;
+    }
 }

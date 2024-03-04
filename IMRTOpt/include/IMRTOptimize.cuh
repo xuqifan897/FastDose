@@ -57,36 +57,23 @@ namespace IMRT {
         const array_1d<float>& beamWeights, const array_1d<float>& maxDose,
         const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
         const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
-        size_t numBeamletsPerBeam, float gamma, float eta,
+        size_t numBeamletsPerBeam, float gamma, float eta, int showTrigger,
         // variable
         int& k_global, int iters_global, int iters_local, float& theta_km1, float& tkm1,
-        array_1d<float>& xkm1, array_1d<float>& vkm1, MatCSR64& x2d, MatCSR64& x2dprox);
+        array_1d<float>& xkm1, array_1d<float>& vkm1, MatCSR64& x2d, MatCSR64& x2dprox,
+        // for result logging
+        std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu);
 
-    bool BOO_IMRT_L2OneHalf_gpu_QL(
+
+    bool BeamOrientationOptimization(
         const std::vector<MatCSR_Eigen>& VOIMatrices,
         const std::vector<MatCSR_Eigen>& VOIMatricesT,
         const std::vector<MatCSR_Eigen>& SpFluenceGrad,
         const std::vector<MatCSR_Eigen>& SpFluenceGradT,
-        const Weights_h& weights_h,
-        const Params& params,
-        const std::vector<uint8_t>& fluenceArray,
-        // results
-        std::vector<float>& xFull,
-        std::vector<float>& costs,
-        std::vector<int>& activeBeams,
-        std::vector<float>& activeNorms,
-        std::vector<std::pair<int, std::vector<int>>>& topN);
-
-    bool BOO_IMRT_L2OneHalf_gpu_QL (
-        const MatCSR64& A, const MatCSR64& ATrans,
-        const MatCSR64& D, const MatCSR64& DTrans,
-        // parameters
-        const array_1d<float>& beamWeights, const array_1d<float>& maxDose,
-        const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
-        const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
-        Params& params, int iterations, size_t numBeamletsPerBeam, bool first_opt,
-        // variable
-        array_1d<float>& xkm1, MatCSR64& x2d, MatCSR64& x2dprox) ;
+        const Weights_h& weights_h, const Params& params_h, std::vector<uint8_t> fluenceArray, 
+        std::vector<float>& xFull, std::vector<float>& costs, std::vector<int>& activeBeams,
+        std::vector<float>& activeNorms, std::vector<std::pair<int, std::vector<int>>>& topN
+    );
 
     class Weights_d {
     public:

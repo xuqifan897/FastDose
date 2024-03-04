@@ -89,6 +89,11 @@ namespace IMRT {
         size_t ptv_voxels, size_t oar_voxels, const cusparseHandle_t& handle,
         const cublasHandle_t& cublas_handle);
 
+    bool beamWeightsInit_func(
+        const std::vector<MatCSR_Eigen>& VOIMatrices,
+        std::vector<float>& beamWeightsInit,
+        size_t ptv_voxels, size_t oar_voxels);
+
     // this function calculates tHat from nrm2 in-place.
     __global__ void d_proxL2Onehalf_calc_tHat(float* buffer, float* tau, size_t size);
 

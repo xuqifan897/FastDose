@@ -97,9 +97,9 @@ namespace IMRT {
         const MatCSR_Eigen& filterT, std::vector<MatCSR_Eigen>& OARMatrices,
         std::vector<MatCSR_Eigen>& OARMatricesT);
     
-    bool parallelMatCoalease(MatCSR_Eigen& OARmat, MatCSR_Eigen& OARmatT,
-        const std::vector<MatCSR_Eigen>& OARMatrices,
-        const std::vector<MatCSR_Eigen>& OARMatricesT);
+    bool parallelMatCoalease(MatCSR_Eigen& VOImat, MatCSR_Eigen& VOImatT,
+        const std::vector<MatCSR_Eigen>& VOIMatrices,
+        const std::vector<MatCSR_Eigen>& VOIMatricesT);
     
     class MatCSR64;
     bool MatOARSlicing(const MatCSR_Eigen& matrixT, MatCSR_Eigen& A,

@@ -121,6 +121,45 @@ bool IMRT::beamWeightsInit_func(
     return 0;
 }
 
+
+bool IMRT::beamWeightsInit_func(
+    const std::vector<MatCSR_Eigen>& VOIMatrices,
+    std::vector<float>& beamWeightsInit,
+    size_t ptv_voxels, size_t oar_voxels
+) {
+    size_t numBeams = VOIMatrices.size();
+    beamWeightsInit.resize(numBeams);
+
+    Eigen::VectorXf result_vec(ptv_voxels + oar_voxels);
+    for (size_t i=0; i<numBeams; i++) {
+        const MatCSR_Eigen& VOIMat = VOIMatrices[i];
+        size_t numBeamlets = VOIMat.getCols();
+
+        Eigen::VectorXf sum_vec(numBeamlets);
+        for (size_t j=0; j<numBeamlets; j++)
+            sum_vec(j) = 1.0f;
+        result_vec = VOIMat * sum_vec;
+
+        float local_sum = 0.0f;
+        for (size_t j=0; j<ptv_voxels; j++)
+            local_sum += result_vec(j);
+        
+        beamWeightsInit[i] = sqrtf(local_sum / (ptv_voxels * numBeamlets));
+    }
+
+    // post-processing
+    float maximum_value = 0.0f;
+    for (size_t i=0; i<numBeams; i++)
+        maximum_value = max(maximum_value, beamWeightsInit[i]);
+    for (size_t i=0; i<numBeams; i++) {
+        beamWeightsInit[i] /= maximum_value;
+        if (beamWeightsInit[i] < 0.1f)
+            beamWeightsInit[i] = 0.1f;
+    }
+    
+    return 0;
+}
+
 bool IMRT::arrayInit_group2(const std::vector<MatCSR64*>& array_group2,
     const std::vector<uint8_t>& fluenceArray, int nBeams, int fluenceDim) {
     // sanity check
