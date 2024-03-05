@@ -57,6 +57,10 @@ namespace IMRT {
 
         bool dense2sparse(float* d_dense, size_t num_rows, size_t num_cols, size_t ld);
         bool fuseEnsemble(MatCSREnsemble& matEns);
+        
+        // selecting the rows with indices rowIndices, which should be sorted.
+        bool slicing_row(const std::vector<size_t>& rowIndices);
+        bool slicing_col(const std::vector<size_t>& colIndices);
 
         cusparseSpMatDescr_t matA;
         size_t* d_csr_offsets;
@@ -134,6 +138,22 @@ namespace IMRT {
     bool OARFiltering(const std::string& resultFolder, const std::vector<StructInfo>& structs,
         std::vector<MatCSR_Eigen>& VOIMatrices, std::vector<MatCSR_Eigen>& VOIMatricesT,
         Weights_h& weights);
+
+    bool benchmark_slicing_row();
+    bool memcpy_kernel(size_t* source_ptr, size_t* source_offsets,
+        size_t* target_ptr, size_t* target_offsets,
+        size_t* block_sizes, size_t num_blocks);
+    bool memcpy_kernel(float* source_ptr, size_t* source_offsets,
+        float* target_ptr, size_t* target_offsets,
+        size_t* block_sizes, size_t num_blocks);
+    __global__ void d_memcpy_kernel(
+        size_t* source_ptr, size_t* source_offsets,
+        size_t* target_ptr, size_t* target_offsets,
+        size_t* block_sizes, size_t num_blocks);
+    __global__ void d_memcpy_kernel(
+        float* source_ptr, size_t* source_offsets,
+        float* target_ptr, size_t* target_offsets,
+        size_t* block_sizes, size_t num_blocks);
 }
 
 #endif

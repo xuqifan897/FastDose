@@ -1,6 +1,8 @@
 #include <fstream>
 #include <string>
 #include <iomanip>
+#include <algorithm>
+#include <random>
 #include <limits>
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
@@ -8,6 +10,7 @@ namespace fs = boost::filesystem;
 #include "IMRTDoseMat.cuh"
 #include "IMRTArgs.h"
 #include "IMRTgeom.cuh"
+#include "IMRTOptBench.cuh"
 
 namespace fd = fastdose;
 
@@ -295,5 +298,283 @@ bool IMRT::DoseMatConstruction(
     checkCudaErrors(cudaEventDestroy(stop));
     checkCudaErrors(cudaEventDestroy(start));
 
+    return 0;
+}
+
+#define SLICING_ROW_DEBUG false
+bool IMRT::MatCSR64::slicing_row(const std::vector<size_t>& rowIndices) {
+    std::vector<size_t> h_csr_offsets(this->numRows+1, 0);
+    checkCudaErrors(cudaMemcpy(h_csr_offsets.data(), this->d_csr_offsets,
+        (this->numRows+1)*sizeof(size_t), cudaMemcpyDeviceToHost));
+    size_t numRows_new = rowIndices.size();
+
+    // in the format <new_idx, old_idx, size>
+    std::vector<std::tuple<size_t, size_t, size_t>> mapping(numRows_new);
+    std::vector<size_t> h_csr_offsets_new(numRows_new+1, 0);
+    for (size_t i=0; i<numRows_new; i++) {
+        size_t row_idx = rowIndices[i];
+        size_t numElementsThisRow = h_csr_offsets[row_idx+1] - h_csr_offsets[row_idx];
+        h_csr_offsets_new[i+1] = h_csr_offsets_new[i] + numElementsThisRow;
+
+        size_t source_address = h_csr_offsets[row_idx];
+        size_t target_address = h_csr_offsets_new[i];
+        mapping[i] = std::make_tuple(target_address, source_address, numElementsThisRow);
+    }
+    checkCudaErrors(cudaMemcpyAsync(this->d_csr_offsets, h_csr_offsets_new.data(),
+        (numRows_new + 1) * sizeof(size_t), cudaMemcpyHostToDevice));
+    
+    // coalease consecutive rows
+    size_t target_idx = std::get<0>(mapping[0]);
+    size_t source_idx = std::get<1>(mapping[0]);
+    size_t size = std::get<2>(mapping[0]);
+    std::vector<size_t> source_offsets_h;
+    std::vector<size_t> target_offsets_h;
+    std::vector<size_t> block_sizes_h;
+    #if SLICING_ROW_DEBUG
+        std::vector<size_t> rows{rowIndices[0]};
+    #endif
+    for (size_t i=1; i<numRows_new; i++) {
+        size_t row_prev = rowIndices[i-1];
+        size_t row_now = rowIndices[i];
+        const auto& mapping_entry = mapping[i];
+        if (row_now == row_prev + 1) {
+            size += std::get<2>(mapping_entry);
+            #if SLICING_ROW_DEBUG
+                rows.push_back(row_now);
+            #endif
+            continue;
+        } else {
+            source_offsets_h.push_back(source_idx);
+            target_offsets_h.push_back(target_idx);
+            block_sizes_h.push_back(size);
+            #if SLICING_ROW_DEBUG
+                std::cout << "Consecutive rows: ";
+                for (size_t j=0; j<rows.size(); j++)
+                    std::cout << rows[j] << "  ";
+                std::cout << "\n(target_idx, source_idx, size): ("
+                    << target_idx << ", " << source_idx << ", " << size << ")\n\n";
+                rows.clear();
+
+                target_idx = std::get<0>(mapping_entry);
+                source_idx = std::get<1>(mapping_entry);
+                size = std::get<2>(mapping_entry);
+                rows.push_back(row_now);
+            #endif
+        }
+    }
+    source_offsets_h.push_back(source_idx);
+    target_offsets_h.push_back(target_idx);
+    block_sizes_h.push_back(size);
+    #if SLICING_ROW_DEBUG
+        std::cout << "Consecutive rows: ";
+        for (size_t j=0; j<rows.size(); j++)
+            std::cout << rows[j] << "  ";
+        std::cout << "\n(target_idx, source_idx, size): ("
+                    << target_idx << ", " << source_idx << ", " << size << ")\n\n";
+        rows.clear();
+    #endif
+    
+    size_t* source_offsets_d;
+    size_t* target_offsets_d;
+    size_t* block_sizes_d;
+    checkCudaErrors(cudaMalloc((void**)&source_offsets_d, source_offsets_h.size()*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&target_offsets_d, target_offsets_h.size()*sizeof(size_t)));
+    checkCudaErrors(cudaMalloc((void**)&block_sizes_d, block_sizes_h.size()*sizeof(size_t)));
+
+    checkCudaErrors(cudaMemcpy(source_offsets_d, source_offsets_h.data(),
+        source_offsets_h.size()*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(target_offsets_d, target_offsets_h.data(),
+        target_offsets_h.size()*sizeof(size_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(block_sizes_d, block_sizes_h.data(),
+        block_sizes_h.size()*sizeof(size_t), cudaMemcpyHostToDevice));
+    
+    memcpy_kernel(this->d_csr_columns, source_offsets_d,
+        this->d_csr_columns, target_offsets_d,
+        block_sizes_d, source_offsets_h.size());
+    memcpy_kernel(this->d_csr_values, source_offsets_d,
+        this->d_csr_values, target_offsets_d,
+        block_sizes_d, source_offsets_h.size());
+    
+    this->numRows = numRows_new;
+    this->nnz = h_csr_offsets_new.back();
+    checkCusparse(cusparseCreateCsr(
+        &this->matA, this->numRows, this->numCols, this->nnz,
+        this->d_csr_offsets, this->d_csr_columns, this->d_csr_values,
+        CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+
+    checkCudaErrors(cudaFree(source_offsets_d));
+    checkCudaErrors(cudaFree(target_offsets_d));
+    checkCudaErrors(cudaFree(block_sizes_d));
+    return 0;
+}
+#undef SLICING_ROW_DEBUG
+
+
+bool IMRT::memcpy_kernel(size_t* source_ptr, size_t* source_offsets,
+    size_t* target_ptr, size_t* target_offsets,
+    size_t* block_sizes, size_t num_blocks) {
+    dim3 gridSize(1, 1, 1);
+    dim3 blockSize(1024, 1, 1);
+    size_t sharedSize = blockSize.x * sizeof(size_t);
+    d_memcpy_kernel<<<gridSize, blockSize, sharedSize, 0>>>(
+        source_ptr, source_offsets, target_ptr, target_offsets,
+        block_sizes, num_blocks);
+    return 0;
+}
+
+
+bool IMRT::memcpy_kernel(float* source_ptr, size_t* source_offsets,
+    float* target_ptr, size_t* target_offsets,
+    size_t* block_sizes, size_t num_blocks) {
+    dim3 gridSize(1, 1, 1);
+    dim3 blockSize(1024, 1, 1);
+    size_t sharedSize = blockSize.x * sizeof(float);
+    d_memcpy_kernel<<<gridSize, blockSize, sharedSize, 0>>>(
+        source_ptr, source_offsets, target_ptr, target_offsets,
+        block_sizes, num_blocks);
+    return 0;
+}
+
+
+__global__ void IMRT::d_memcpy_kernel(
+    size_t* source_ptr, size_t* source_offsets,
+    size_t* target_ptr, size_t* target_offsets,
+    size_t* block_sizes, size_t num_blocks
+) {
+    extern __shared__ size_t sharedData_size_t[];
+    size_t idx = threadIdx.x;
+    size_t batch_size = blockDim.x;
+    for (size_t i=0; i<num_blocks; i++) {
+        size_t current_source_offset = source_offsets[i];
+        size_t current_target_offset = target_offsets[i];
+        size_t current_block_size = block_sizes[i];
+        size_t num_batches = (current_block_size + batch_size - 1) / batch_size;
+        for (size_t j=0; j<num_batches; j++) {
+            size_t j_times_batch_size = j * batch_size;
+            size_t source_idx_start = current_source_offset + j_times_batch_size;
+            size_t target_idx_start = current_target_offset + j_times_batch_size;
+            size_t numActiveThreads = min(batch_size, current_block_size - j_times_batch_size);
+            if (idx < numActiveThreads)
+                sharedData_size_t[idx] = source_ptr[source_idx_start + idx];
+            __syncthreads();
+            if (idx < numActiveThreads)
+                target_ptr[target_idx_start + idx] = sharedData_size_t[idx];
+            __syncthreads();
+        }
+        if (idx == 0) {
+            printf("progress: %lu / %lu\n", i, num_blocks);
+        }
+    }
+}
+
+
+__global__ void IMRT::d_memcpy_kernel(
+    float* source_ptr, size_t* source_offsets,
+    float* target_ptr, size_t* target_offsets,
+    size_t* block_sizes, size_t num_blocks
+) {
+    extern __shared__ float sharedData_float[];
+    size_t idx = threadIdx.x;
+    size_t batch_size = blockDim.x;
+    for (size_t i=0; i<num_blocks; i++) {
+        size_t current_source_offset = source_offsets[i];
+        size_t current_target_offset = target_offsets[i];
+        size_t current_block_size = block_sizes[i];
+        size_t num_batches = (current_block_size + batch_size - 1) / batch_size;
+        for (size_t j=0; j<num_batches; j++) {
+            size_t j_times_batch_size = j * batch_size;
+            size_t source_idx_start = current_source_offset + j_times_batch_size;
+            size_t target_idx_start = current_target_offset + j_times_batch_size;
+            size_t numActiveThreads = min(batch_size, current_block_size - j_times_batch_size);
+            if (idx < numActiveThreads)
+                sharedData_float[idx] = source_ptr[source_idx_start + idx];
+            __syncthreads();
+            if (idx < numActiveThreads)
+                target_ptr[target_idx_start + idx] = sharedData_float[idx];
+            __syncthreads();
+        }
+    }
+}
+
+
+bool IMRT::benchmark_slicing_row() {
+    size_t numRows = 100;
+    size_t numCols = 100;
+    std::srand(10086);
+    MatCSR_Eigen matrix_Eigen;
+    randomize_MatCSR_Eigen(matrix_Eigen, numRows, numCols);
+
+    size_t numRows_selected = 50;
+    std::vector<size_t> active_rows(numRows, 0);
+    for (size_t i=0; i<numRows; i++)
+        active_rows[i] = i;
+    std::mt19937 rng(10086);
+    std::shuffle(active_rows.begin(), active_rows.end(), rng);
+    active_rows.resize(numRows_selected);
+    std::sort(active_rows.begin(), active_rows.end());
+    
+    std::cout << "Active rows:\n";
+    for (size_t i=0; i<numRows_selected; i++)
+        std::cout << active_rows[i] << "  ";
+    std::cout << std::endl;
+
+    // construct row-selection matrix
+    MatCSR_Eigen row_selection;
+    EigenIdxType* row_selection_offsets = (EigenIdxType*)malloc(
+        (numRows_selected+1)*sizeof(EigenIdxType));
+    EigenIdxType* row_selection_columns = new EigenIdxType[numRows_selected];
+    float* row_selection_values = new float[numRows_selected];
+    row_selection_offsets[0] = 0;
+    for (size_t i=0; i<numRows_selected; i++) {
+        row_selection_offsets[i+1] = i + 1;
+        row_selection_columns[i] = active_rows[i];
+        row_selection_values[i] = 1.0f;
+    }
+    row_selection.customInit(numRows_selected, numCols, numRows_selected,
+        row_selection_offsets, row_selection_columns, row_selection_values);
+    MatCSR_Eigen result_Eigen = row_selection * matrix_Eigen;
+    
+    #if false
+    // for debug purposes
+        std::cout << "Original matrix:\n" << matrix_Eigen << "\n\nRow selection matrix:\n"
+            << row_selection << "\n\nResult matrix:\n" << result_Eigen << std::endl;
+    #endif
+
+    MatCSR64 matrix_cu;
+    Eigen2Cusparse(matrix_Eigen, matrix_cu);
+    matrix_cu.slicing_row(active_rows);
+
+    std::vector<size_t> offsets_test(numRows_selected + 1);
+    std::vector<size_t> columns_test(matrix_cu.nnz);
+    std::vector<float> values_test(matrix_cu.nnz);
+    checkCudaErrors(cudaMemcpy(offsets_test.data(), matrix_cu.d_csr_offsets,
+        (numRows_selected + 1) * sizeof(size_t), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(columns_test.data(), matrix_cu.d_csr_columns,
+        matrix_cu.nnz * sizeof(size_t), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(values_test.data(), matrix_cu.d_csr_values,
+        matrix_cu.nnz * sizeof(float), cudaMemcpyDeviceToHost));
+
+    EigenIdxType* offsets_ref = *result_Eigen.getOffset();
+    const EigenIdxType* columns_ref = result_Eigen.getIndices();
+    const float* values_ref = result_Eigen.getValues();
+
+    for (size_t i=0; i<numRows_selected+1; i++) {
+        if (offsets_test[i] != offsets_ref[i]) {
+            std::cerr << "Offset mismatch at index " << i << std::endl;
+            return 1;
+        }
+    }
+
+    for (size_t i=0; i<matrix_cu.nnz; i++) {
+        if (columns_test[i] != columns_ref[i]) {
+            std::cerr << "Column mismatch at index " << i << std::endl;
+            return 1;
+        }
+        if (std::abs(values_test[i] - values_ref[i]) > eps_fastdose) {
+            std::cerr << "Value mismatch at index " << i << std::endl;
+            return 1;
+        }
+    }
+    std::cout << "Function slicing_row passed the test!" << std::endl;
     return 0;
 }

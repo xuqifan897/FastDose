@@ -1,6 +1,7 @@
 #include <string>
 #include <tuple>
 #include <iomanip>
+#include <random>
 #include <algorithm>
 #include <chrono>
 #include "IMRTOptimize.cuh"
@@ -206,6 +207,27 @@ bool IMRT::BeamOrientationOptimization(
             << duration.count() * 1e-6f << " [s]" << std::endl;
     #endif
 
+    #if true
+    // for debug purposes
+    // to measure the time of slicing_row
+        size_t num_beamlets_selected = ATrans.numRows / 2;
+        std::vector<size_t> active_rows(ATrans.numRows);
+        for (size_t i=0; i<active_rows.size(); i++)
+            active_rows[i] = i;
+        std::mt19937 rng(10086);
+        std::shuffle(active_rows.begin(), active_rows.end(), rng);
+        active_rows.resize(num_beamlets_selected);
+        std::sort(active_rows.begin(), active_rows.end());
+        auto slicing_begin = std::chrono::high_resolution_clock::now();
+        ATrans.slicing_row(active_rows);
+        auto slicing_end = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<
+            std::chrono::milliseconds>(slicing_end - slicing_begin);
+        std::cout << "Row slicing of matrix ATrans time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+        return 0;
+    #endif
+
     // prepare beam weights
     std::vector<float> beamWeightsInit(numBeams, 0.0f);
     beamWeightsInit_func(VOIMatrices, beamWeightsInit,
@@ -291,6 +313,7 @@ bool IMRT::BeamOrientationOptimization(
         std::cout << "Variables initialization time elapsed: "\
             << duration.count() * 1e-6f << " [s]" << std::endl;
     #endif
+    return 0;
 
     // begin optimization
     std::cout << std::scientific << "\n\nOptimization starts." << std::endl;
