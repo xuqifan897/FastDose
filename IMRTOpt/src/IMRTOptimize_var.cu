@@ -10,7 +10,8 @@ namespace fs = boost::filesystem;
 
 bool IMRT::OARFiltering(
     const std::string& resultFolder, const std::vector<StructInfo>& structs,
-    std::vector<MatCSR_Eigen>& VOIMatrices, std::vector<MatCSR_Eigen>& VOIMatricesT,
+    std::vector<MatCSR_Eigen>& MatricesT_full, std::vector<MatCSR_Eigen>& VOIMatrices,
+    std::vector<MatCSR_Eigen>& VOIMatricesT,
     Weights_h& weights
 ) {
     MatCSR_Eigen filter, filterT;
@@ -18,7 +19,8 @@ bool IMRT::OARFiltering(
         std::cerr << "OAR filter and its transpose construction error." << std::endl;
         return 1;
     }
-    if (parallelSpGEMM(resultFolder, filter, filterT, VOIMatrices, VOIMatricesT)) {
+    if (parallelSpGEMM(resultFolder, filter, filterT,
+        MatricesT_full, VOIMatrices, VOIMatricesT)) {
         std::cerr << "CPU VOI dose loading matrices and their transpose "
             "construction error." << std::endl;
         return 1;
@@ -827,10 +829,10 @@ bool IMRT::MatReservior_dev_diag(
         MatCSR_Eigen VOIMatT_Eigen;
         MatCSR_Eigen D_Eigen;
         MatCSR_Eigen DTrans_Eigen;
-        std::vector<MatCSR_Eigen*> VOIMatrice_ptr(VOIMatricesT.size(), nullptr);
-        std::vector<MatCSR_Eigen*> VOIMatriceT_ptr(VOIMatricesT.size(), nullptr);
-        std::vector<MatCSR_Eigen*> SpFluenceGrad_ptr(VOIMatricesT.size(), nullptr);
-        std::vector<MatCSR_Eigen*> SpFluenceGradT_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<const MatCSR_Eigen*> VOIMatrice_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<const MatCSR_Eigen*> VOIMatriceT_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<const MatCSR_Eigen*> SpFluenceGrad_ptr(VOIMatricesT.size(), nullptr);
+        std::vector<const MatCSR_Eigen*> SpFluenceGradT_ptr(VOIMatricesT.size(), nullptr);
         for (int i=0; i<VOIMatricesT.size(); i++) {
             VOIMatrice_ptr[i] = (MatCSR_Eigen*)&VOIMatrices[i];
             VOIMatriceT_ptr[i] = (MatCSR_Eigen*)&VOIMatricesT[i];

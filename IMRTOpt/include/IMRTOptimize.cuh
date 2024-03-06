@@ -54,13 +54,14 @@ namespace IMRT {
         const MatCSR64& A, const MatCSR64& ATrans,
         const MatCSR64& D, const MatCSR64& DTrans,
         // parameters
-        const array_1d<float>& beamWeights, const array_1d<float>& maxDose,
+        array_1d<float>& beamWeights, const array_1d<float>& maxDose,
         const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
         const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
-        size_t numBeamletsPerBeam, float gamma, float eta, int showTrigger,
+        size_t numBeamletsPerBeam, float gamma, float eta, int showTrigger, int changeWeightsTrigger,
         // variable
-        int& k_global, int iters_global, int iters_local, float& theta_km1, float& tkm1,
-        array_1d<float>& xkm1, array_1d<float>& vkm1, MatCSR64& x2d, MatCSR64& x2dprox,
+        int& k_global, int iters_global, int iters_local, int numBeamsWeWant,
+        float& theta_km1, float& tkm1, array_1d<float>& xkm1, array_1d<float>& vkm1,
+        MatCSR64& x2d, MatCSR64& x2dprox,
         // for result logging
         std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu);
 
@@ -70,10 +71,44 @@ namespace IMRT {
         const std::vector<MatCSR_Eigen>& VOIMatricesT,
         const std::vector<MatCSR_Eigen>& SpFluenceGrad,
         const std::vector<MatCSR_Eigen>& SpFluenceGradT,
-        const Weights_h& weights_h, const Params& params_h, std::vector<uint8_t> fluenceArray, 
-        std::vector<float>& xFull, std::vector<float>& costs, std::vector<int>& activeBeams,
-        std::vector<float>& activeNorms, std::vector<std::pair<int, std::vector<int>>>& topN
+        const Weights_h& weights_h, const Params& params_h,
+        const std::vector<uint8_t>& fluenceArray, 
+        std::vector<float>& costs, std::vector<int>& activeBeams,
+        std::vector<float>& activeNorms
     );
+
+    bool polish_BOO_IMRT_gpu(
+        const MatCSR64& A, const MatCSR64& ATrans,
+        const MatCSR64& D, const MatCSR64& DTrans,
+        // parameters
+        const array_1d<float>& maxDose,
+        const array_1d<float>& minDoseTarget, const array_1d<float>& minDoseTargetWeights,
+        const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
+        float gamma, float eta, int& k_global, int iters_global, int iters_local,
+        float& theta_km1, float& tkm1, array_1d<float>& xkm1, array_1d<float>& vkm1,
+        std::vector<float>& loss_cpu
+    );
+
+    bool FluencePolish(
+        const std::vector<MatCSR_Eigen>& VOIMatrices,
+        const std::vector<MatCSR_Eigen>& VOIMatricesT,
+        const std::vector<MatCSR_Eigen>& SpFluenceGrad,
+        const std::vector<MatCSR_Eigen>& SpFluenceGradT,
+        const Weights_h& weights_h, const Params& params_h,
+        const std::vector<uint8_t>& fluenceArray,
+        const std::vector<int>& activeBeams,
+        std::vector<float>& costs, Eigen::VectorXf& xFull
+    );
+
+    bool resultDoseCalc(
+        const std::vector<MatCSR_Eigen>& MatricesT_full,
+        const std::vector<int>& activeBeams,
+        const Eigen::VectorXf& xFull,
+        Eigen::VectorXf& finalDose);
+
+    bool writeResults(const std::vector<int>& activeBeams,
+        const std::vector<MatCSR_Eigen>& MatricesT_full,
+        const Eigen::VectorXf& xFull, const Eigen::VectorXf& finalDose);
 
     class Weights_d {
     public:
@@ -250,6 +285,7 @@ namespace IMRT {
 
     // this function performs the element-wise operation: target[i] = max(target[i], value);
     bool elementWiseMax(MatCSR64& target, float value);
+    bool elementWiseMax(array_1d<float>& target, float value);
     __global__ void d_elementWiseMax(float* target, float value, size_t size);
 
     bool assignmentTest();

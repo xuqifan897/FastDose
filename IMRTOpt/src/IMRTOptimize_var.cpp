@@ -132,10 +132,10 @@ bool IMRT::fluenceGradInit(
 
 
 bool IMRT::matFuseFunc(
-    std::vector<MatCSR_Eigen*>& VOIMatrices,
-    std::vector<MatCSR_Eigen*>& VOIMatricesT,
-    std::vector<MatCSR_Eigen*>& SpFluenceGrad,
-    std::vector<MatCSR_Eigen*>& SpFluenceGradT,
+    std::vector<const MatCSR_Eigen*>& VOIMatrices,
+    std::vector<const MatCSR_Eigen*>& VOIMatricesT,
+    std::vector<const MatCSR_Eigen*>& SpFluenceGrad,
+    std::vector<const MatCSR_Eigen*>& SpFluenceGradT,
     MatCSR_Eigen& VOIMat_Eigen,
     MatCSR_Eigen& VOIMatT_Eigen,
     MatCSR_Eigen& D_Eigen,
@@ -204,7 +204,7 @@ bool IMRT::matFuseFunc(
     for (size_t row=0; row<VOImat_numRows; row++) {
         m_offsets_VOImat[row + 1] = 0;
         for (size_t i=0; i<numMatrices; i++) {
-            EigenIdxType* localOffsets = *(VOIMatrices[i]->getOffset());
+            const EigenIdxType* localOffsets = VOIMatrices[i]->getOffset();
             m_offsets_VOImat[row + 1] += localOffsets[row + 1] - localOffsets[row];
         }
     }
@@ -218,7 +218,7 @@ bool IMRT::matFuseFunc(
         size_t dest_idx = m_offsets_VOImat[row];
         size_t column_offset = 0;
         for (int i=0; i<numMatrices; i++) {
-            EigenIdxType* localOffsets = *(VOIMatrices[i]->getOffset());
+            const EigenIdxType* localOffsets = VOIMatrices[i]->getOffset();
             const EigenIdxType* localColumns = VOIMatrices[i]->getIndices();
             const float* localValues = VOIMatrices[i]->getValues();
 
@@ -264,13 +264,13 @@ bool IMRT::matFuseFunc(
 }
 
 
-bool IMRT::diagBlock(MatCSR_Eigen& target, const std::vector<MatCSR_Eigen*>& source)
+bool IMRT::diagBlock(MatCSR_Eigen& target, const std::vector<const MatCSR_Eigen*>& source)
 {
     // calculate the number of rows and the number of non-zero elements
     size_t target_numRows = 0;
     size_t target_numCols = 0;
     size_t target_nnz = 0;
-    for (MatCSR_Eigen* mat : source) {
+    for (const MatCSR_Eigen* mat : source) {
         target_numRows += mat->getRows();
         target_numCols += mat->getCols();
         target_nnz += mat->getNnz();
@@ -284,9 +284,9 @@ bool IMRT::diagBlock(MatCSR_Eigen& target, const std::vector<MatCSR_Eigen*>& sou
     EigenIdxType row_offset = 0;
     EigenIdxType col_offset = 0;
     EigenIdxType nnz_offset = 0;
-    for (MatCSR_Eigen* mat : source) {
+    for (const MatCSR_Eigen* mat : source) {
         // update target_offsets
-        EigenIdxType* local_offsets = *mat->getOffset();
+        const EigenIdxType* local_offsets = mat->getOffset();
         const EigenIdxType* local_columns = mat->getIndices();
         const float* local_values = mat->getValues();
         for (size_t i=0; i<mat->getRows(); i++) {

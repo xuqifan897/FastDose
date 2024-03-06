@@ -18,16 +18,24 @@ bool IMRT::OARFiltering(
         return 1;
     }
     weights_d.fromHost(weights);
+    std::vector<MatCSR_Eigen> MatricesT_full;
     std::vector<MatCSR_Eigen> VOIMatrices;
     std::vector<MatCSR_Eigen> VOIMatricesT;
-    if (parallelSpGEMM(resultFolder, filter, filterT, VOIMatrices, VOIMatricesT)) {
+    if (parallelSpGEMM(resultFolder, filter, filterT,
+        VOIMatrices, VOIMatricesT, MatricesT_full)) {
         std::cerr << "CPU VOI dose loading matrices and their transpose "
             "construction error." << std::endl;
         return 1;
     }
 
+    std::vector<const MatCSR_Eigen*> VOIMatrices_ptr(VOIMatrices.size(), nullptr);
+    std::vector<const MatCSR_Eigen*> VOIMatricesT_ptr(VOIMatricesT.size(), nullptr);
+    for (size_t i=0; i<VOIMatrices.size(); i++) {
+        VOIMatrices_ptr[i] = & VOIMatrices[i];
+        VOIMatricesT_ptr[i] = & VOIMatricesT[i];
+    }
     MatCSR_Eigen VOIMat, VOIMatT;
-    if (parallelMatCoalease(VOIMat, VOIMatT, VOIMatrices, VOIMatricesT)) {
+    if (parallelMatCoalesce(VOIMat, VOIMatT, VOIMatrices_ptr, VOIMatricesT_ptr)) {
         std::cerr << "GPU VOI dose loading matrix and its transpose "
             "construction error." << std::endl;
         return 1;

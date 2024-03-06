@@ -94,12 +94,12 @@ namespace IMRT {
     };
 
     bool parallelSpGEMM(const std::string& resultFolder, const MatCSR_Eigen& filter,
-        const MatCSR_Eigen& filterT, std::vector<MatCSR_Eigen>& OARMatrices,
-        std::vector<MatCSR_Eigen>& OARMatricesT);
+        const MatCSR_Eigen& filterT, std::vector<MatCSR_Eigen>& MatricesT_full,
+        std::vector<MatCSR_Eigen>& OARMatrices, std::vector<MatCSR_Eigen>& OARMatricesT);
     
-    bool parallelMatCoalease(MatCSR_Eigen& VOImat, MatCSR_Eigen& VOImatT,
-        const std::vector<MatCSR_Eigen>& VOIMatrices,
-        const std::vector<MatCSR_Eigen>& VOIMatricesT);
+    bool parallelMatCoalesce(MatCSR_Eigen& VOImat, MatCSR_Eigen& VOImatT,
+        const std::vector<const MatCSR_Eigen*>& VOIMatrices,
+        const std::vector<const MatCSR_Eigen*>& VOIMatricesT);
     
     class MatCSR64;
     bool MatOARSlicing(const MatCSR_Eigen& matrixT, MatCSR_Eigen& A,
@@ -116,16 +116,16 @@ namespace IMRT {
         int fluenceDim);
 
     bool matFuseFunc(
-        std::vector<MatCSR_Eigen*>& VOIMatrices,
-        std::vector<MatCSR_Eigen*>& VOIMatricesT,
-        std::vector<MatCSR_Eigen*>& SpFluenceGrad,
-        std::vector<MatCSR_Eigen*>& SpFluenceGradT,
+        std::vector<const MatCSR_Eigen*>& VOIMatrices,
+        std::vector<const MatCSR_Eigen*>& VOIMatricesT,
+        std::vector<const MatCSR_Eigen*>& SpFluenceGrad,
+        std::vector<const MatCSR_Eigen*>& SpFluenceGradT,
         MatCSR_Eigen& VOIMat_Eigen,
         MatCSR_Eigen& VOIMatT_Eigen,
         MatCSR_Eigen& D_Eigen,
         MatCSR_Eigen& DTrans_Eigen);
 
-    bool diagBlock(MatCSR_Eigen& target, const std::vector<MatCSR_Eigen*>& source);
+    bool diagBlock(MatCSR_Eigen& target, const std::vector<const MatCSR_Eigen*>& source);
 
     bool fluenceGradInit(
         std::vector<IMRT::MatCSR_Eigen>& SpFluenceGrad,

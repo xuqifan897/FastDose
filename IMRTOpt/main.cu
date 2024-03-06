@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
 
     IMRT::Params params;
     IMRT::Weights_h weights_h;
-    std::vector<IMRT::MatCSR_Eigen> VOIMatrices, VOIMatricesT;
+    std::vector<IMRT::MatCSR_Eigen> MatricesT_full, VOIMatrices, VOIMatricesT;
     std::vector<IMRT::MatCSR_Eigen> SpFluenceGrad, SpFluenceGradT;
     std::vector<uint8_t> fluenceArray;
 
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
     int SpMatT_ColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
     
     if (IMRT::OARFiltering(doseMatFolder.string(), structs,
-        VOIMatrices, VOIMatricesT, weights_h)) {
+        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h)) {
         std::cerr << "VOI matrices and their transpose initialization error." << std::endl;
         return 1;
     }
@@ -109,23 +109,38 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::vector<float> xFull;
     std::vector<float> costs;
     std::vector<int> activeBeams;
     std::vector<float> activeNorms;
-    std::vector<std::pair<int, std::vector<int>>> topN;
-    // if (IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
-    //     VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
-    //     weights_h, params, fluenceArray,
-    //     xFull, costs, activeBeams, activeNorms, topN)) {
-    //     std::cerr << "Beam orientation optimization error." << std::endl;
-    //     return 1;
-    // }
     if (IMRT::BeamOrientationOptimization(
         VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
-        weights_h, params, fluenceArray, xFull, costs, activeBeams,
-        activeNorms, topN)) {
+        weights_h, params, fluenceArray, costs, activeBeams,
+        activeNorms)) {
         std::cerr << "Beam orientation optimization error." << std::endl;
         return 1;
     }
+
+    params.maxIter = 500;
+    std::vector<float> costs_polish;
+    Eigen::VectorXf xFull;
+    if (IMRT::FluencePolish(
+        VOIMatrices, VOIMatricesT, SpFluenceGrad, SpFluenceGradT,
+        weights_h, params, fluenceArray, activeBeams, costs_polish, xFull)) {
+        std::cerr << "Fluence map polishing error." << std::endl;
+        return 1;
+    }
+
+    Eigen::VectorXf finalDose;
+    if (IMRT::resultDoseCalc(
+        MatricesT_full, activeBeams, xFull, finalDose)) {
+        std::cerr << "Final dose calculation error." << std::endl;
+        return 1;
+    }
+
+    if (IMRT::writeResults(activeBeams, MatricesT_full, xFull, finalDose)) {
+        std::cerr << "Saving results error." << std::endl;
+        return 1;
+    }
+
+    return 0;
 }

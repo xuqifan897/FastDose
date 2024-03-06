@@ -10,6 +10,7 @@ bool IMRT::parallelSpGEMM(
     const std::string& resultFolder,
     const MatCSR_Eigen& filter,
     const MatCSR_Eigen& filterT,
+    std::vector<MatCSR_Eigen>& MatricesT_full,
     std::vector<MatCSR_Eigen>& VOIMatrices,
     std::vector<MatCSR_Eigen>& VOIMatricesT
 ) {
@@ -79,7 +80,7 @@ bool IMRT::parallelSpGEMM(
             << " [s]"<< std::endl;
     #endif
 
-    std::vector<MatCSR_Eigen> matricesT(numMatrices);
+    MatricesT_full.resize(numMatrices);
     std::vector<size_t> cumuNnz(numMatrices, 0);
     std::vector<size_t> cumuNumRows(numMatrices, 0);
     for (int i=1; i<numMatrices; i++) {
@@ -104,7 +105,7 @@ bool IMRT::parallelSpGEMM(
         std::copy(&h_valuesBuffer[local_cumuNnz],
             &h_valuesBuffer[local_cumuNnz+localNnz], m_values);
 
-        matricesT[i].customInit(localNumRows, filter.getRows(), localNnz,
+        MatricesT_full[i].customInit(localNumRows, filter.getRows(), localNnz,
             m_offsets, m_columns, m_values);
     }
     #if slicingTiming
@@ -125,7 +126,7 @@ bool IMRT::parallelSpGEMM(
     VOIMatricesT.resize(numMatrices);
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
-        VOIMatricesT[i] = matricesT[i] * filter;
+        VOIMatricesT[i] = MatricesT_full[i] * filter;
         VOIMatrices[i] = VOIMatricesT[i].transpose();
     }
     #if slicingTiming
@@ -181,10 +182,10 @@ void IMRT::readBlockParallelFunc(const std::string& filename,
     f.close();
 }
 
-bool IMRT::parallelMatCoalease(
+bool IMRT::parallelMatCoalesce(
     MatCSR_Eigen& VOImat, MatCSR_Eigen& VOImatT,
-    const std::vector<MatCSR_Eigen>& VOIMatrices,
-    const std::vector<MatCSR_Eigen>& VOIMatricesT
+    const std::vector<const MatCSR_Eigen*>& VOIMatrices,
+    const std::vector<const MatCSR_Eigen*>& VOIMatricesT
 ) {
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
@@ -194,14 +195,14 @@ bool IMRT::parallelMatCoalease(
     size_t numRowsTotal_matT = 0;
     size_t nnzTotal_matT = 0;
     for (int i=0; i<numMatrices; i++) {
-        numRowsTotal_matT += VOIMatricesT[i].getRows();
-        nnzTotal_matT += VOIMatricesT[i].getNnz();
+        numRowsTotal_matT += VOIMatricesT[i]->getRows();
+        nnzTotal_matT += VOIMatricesT[i]->getNnz();
     }
     EigenIdxType* VOImatT_offsets = (EigenIdxType*)malloc((numRowsTotal_matT+1)*sizeof(EigenIdxType));
     VOImatT_offsets[0] = 0;
     size_t offsetsIdx = 0;
     for (int i=0; i<numMatrices; i++) {
-        const MatCSR_Eigen& local_VOIMatricesT = VOIMatricesT[i];
+        const MatCSR_Eigen& local_VOIMatricesT = *VOIMatricesT[i];
         EigenIdxType local_numRows = local_VOIMatricesT.getRows();
         const EigenIdxType* m_outerIndex = local_VOIMatricesT.getOffset();
         for (EigenIdxType j=0; j<local_numRows; j++) {
@@ -212,14 +213,14 @@ bool IMRT::parallelMatCoalease(
     }
     std::vector<EigenIdxType> cumuNnz(numMatrices, 0);
     for (int i=0; i<numMatrices-1; i++) {
-        cumuNnz[i+1] = cumuNnz[i] + VOIMatricesT[i].getNnz();
+        cumuNnz[i+1] = cumuNnz[i] + VOIMatricesT[i]->getNnz();
     }
     EigenIdxType* VOImatT_columns = new EigenIdxType[nnzTotal_matT];
     float* VOImatT_values = new float[nnzTotal_matT];
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
         EigenIdxType nnz_offset = cumuNnz[i];
-        const MatCSR_Eigen& localVOIMat = VOIMatricesT[i];
+        const MatCSR_Eigen& localVOIMat = *VOIMatricesT[i];
         EigenIdxType localNnz = localVOIMat.getNnz();
         const EigenIdxType* localColumns = localVOIMat.getIndices();
         const float* localValues = localVOIMat.getValues();
@@ -227,7 +228,7 @@ bool IMRT::parallelMatCoalease(
         std::copy(localValues, localValues + localNnz, VOImatT_values + nnz_offset);
     }
     
-    VOImatT.customInit(numRowsTotal_matT, VOIMatricesT[0].getCols(), nnzTotal_matT,
+    VOImatT.customInit(numRowsTotal_matT, VOIMatricesT[0]->getCols(), nnzTotal_matT,
         VOImatT_offsets, VOImatT_columns, VOImatT_values);
     #if slicingTiming
         auto time1 = std::chrono::high_resolution_clock::now();
@@ -238,7 +239,7 @@ bool IMRT::parallelMatCoalease(
 
     
     // initialize VOImat
-    Eigen::Index VOImat_numRows = VOIMatrices[0].getRows();
+    Eigen::Index VOImat_numRows = VOIMatrices[0]->getRows();
     size_t VOImat_numCols = numRowsTotal_matT;
     EigenIdxType* m_offsets_VOImat = (EigenIdxType*)malloc((VOImat_numRows+1)*sizeof(EigenIdxType));
     EigenIdxType* m_columns_VOImat = new EigenIdxType[nnzTotal_matT];
@@ -251,7 +252,7 @@ bool IMRT::parallelMatCoalease(
     for (EigenIdxType j=0; j<VOImat_numRows; j++) {
         for (EigenIdxType i=0; i<numMatrices; i++) {
             offsets_copy[i][j] = currentOffset;
-            const MatCSR_Eigen& localVOIMat = VOIMatrices[i];
+            const MatCSR_Eigen& localVOIMat = *VOIMatrices[i];
             const EigenIdxType* localOffsets = localVOIMat.getOffset();
             EigenIdxType nnzThisRow = localOffsets[j+1] - localOffsets[j];
             currentOffset += nnzThisRow;
@@ -266,12 +267,12 @@ bool IMRT::parallelMatCoalease(
     }
     std::vector<EigenIdxType> cumuNumCols(numMatrices, 0);
     for (int i=0; i<numMatrices-1; i++) {
-        cumuNumCols[i + 1] = cumuNumCols[i] + VOIMatrices[i].getCols();
+        cumuNumCols[i + 1] = cumuNumCols[i] + VOIMatrices[i]->getCols();
     }
 
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
-        const MatCSR_Eigen& localVOIMat = VOIMatrices[i];
+        const MatCSR_Eigen& localVOIMat = *VOIMatrices[i];
         const EigenIdxType* localOffsets = localVOIMat.getOffset();
         const EigenIdxType* localColumns = localVOIMat.getIndices();
         const float* localValues = localVOIMat.getValues();

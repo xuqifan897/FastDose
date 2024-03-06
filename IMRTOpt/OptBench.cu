@@ -104,8 +104,8 @@ int main(int argc, char** argv) {
     IMRT::BOO_IMRT_L2OneHalf_gpu_QL(A_cu, ATrans_cu, D_cu, DTrans_cu,
         beamWeights_cu, maxDose_cu, minDoseTarget_cu, minDoseTargetWeights_cu,
         maxWeightsLong_cu, OARWeightsLong_cu,
-        numBeamletsPerBeam, params.gamma, params.eta, params.showTrigger,
-        k_global, params.maxIter, params.maxIter, theta_km1, tkm1,
+        numBeamletsPerBeam, params.gamma, params.eta, params.showTrigger, params.changeWeightsTrigger,
+        k_global, params.maxIter, params.maxIter, params.numBeamsWeWant, theta_km1, tkm1,
         xkm1_cu, vkm1_cu, x2d, x2dprox,
         loss_cpu, nrm_cpu);
 }

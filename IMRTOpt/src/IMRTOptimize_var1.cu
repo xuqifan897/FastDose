@@ -123,7 +123,7 @@ bool IMRT::beamWeightsInit_func(
 
 
 bool IMRT::beamWeightsInit_func(
-    const std::vector<MatCSR_Eigen>& VOIMatrices,
+    const std::vector<const MatCSR_Eigen*>& VOIMatrices,
     std::vector<float>& beamWeightsInit,
     size_t ptv_voxels, size_t oar_voxels
 ) {
@@ -132,7 +132,7 @@ bool IMRT::beamWeightsInit_func(
 
     Eigen::VectorXf result_vec(ptv_voxels + oar_voxels);
     for (size_t i=0; i<numBeams; i++) {
-        const MatCSR_Eigen& VOIMat = VOIMatrices[i];
+        const MatCSR_Eigen& VOIMat = *VOIMatrices[i];
         size_t numBeamlets = VOIMat.getCols();
 
         Eigen::VectorXf sum_vec(numBeamlets);
@@ -276,6 +276,14 @@ bool IMRT::elementWiseMax(MatCSR64& target, float value) {
     dim3 gridSize(1, 1, 1);
     gridSize.x = (target.nnz + blockSize.x - 1) / blockSize.x;
     d_elementWiseMax<<<gridSize, blockSize>>>(target.d_csr_values, value, target.nnz);
+    return 0;
+}
+
+bool IMRT::elementWiseMax(array_1d<float>& target, float value) {
+    dim3 blockSize(64, 1, 1);
+    dim3 gridSize(1, 1, 1);
+    gridSize.x = (target.size + blockSize.x - 1) / blockSize.x;
+    d_elementWiseMax<<<gridSize, blockSize>>>(target.data, value, target.size);
     return 0;
 }
 
