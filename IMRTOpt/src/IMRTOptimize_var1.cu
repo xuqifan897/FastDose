@@ -124,7 +124,7 @@ bool IMRT::beamWeightsInit_func(
 
 bool IMRT::beamWeightsInit_func(
     const std::vector<const MatCSR_Eigen*>& VOIMatrices,
-    std::vector<float>& beamWeightsInit,
+    Eigen::VectorXf& beamWeightsInit,
     size_t ptv_voxels, size_t oar_voxels
 ) {
     size_t numBeams = VOIMatrices.size();

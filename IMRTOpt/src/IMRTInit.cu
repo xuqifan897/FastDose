@@ -360,7 +360,8 @@ bool IMRT::ParamsInit(Params& params) {
         "stepSize",
         "maxIter",
         "showTrigger",
-        "ChangeWeightsTrigger"
+        "ChangeWeightsTrigger",
+        "pruneTrigger"
     };
 
     if (data.size() != keys.size()) {
@@ -383,6 +384,7 @@ bool IMRT::ParamsInit(Params& params) {
     params.maxIter = std::stoi(data[5][1]);
     params.showTrigger = std::stoi(data[6][1]);
     params.changeWeightsTrigger = std::stoi(data[7][1]);
+    params.pruneTrigger = std::stoi(data[8][1]);
 
     std::vector<std::string> publicMemberValues;
     std::stringstream valueStream;

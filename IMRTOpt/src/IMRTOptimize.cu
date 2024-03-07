@@ -26,8 +26,10 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
     float& theta_km1, float& tkm1, array_1d<float>& xkm1, array_1d<float>& vkm1,
     MatCSR64& x2d, MatCSR64& x2dprox,
     // for result logging
-    std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu
-) {    
+    std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu,
+    float& numActiveBeamsStrict, bool& stop
+) {
+    stop = false;
     size_t ptv_voxels = minDoseTarget.size;
     size_t oar_voxels = OARWeightsLong.size;
     size_t d_rows = D.numRows;
@@ -57,7 +59,6 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
 
     int k_local = 0;
     float reductionFactor = 0.5f;
-    float numActiveBeamsStrict = 0;
     float t = tkm1, theta, gx, gy, rhs;
     float gradAty_dot_x_minus_y, x_minus_y_norm_square;
     float cost;
@@ -133,21 +134,26 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
         elementWiseGreater(nrm.data, activeBeamsStrict.data, 1e-4f, numBeams);
         checkCublas(cublasSasum(handle_cublas, numBeams,
             activeBeamsStrict.data, 1, &numActiveBeamsStrict));
-        if (numActiveBeamsStrict - eps_fastdose <= numBeamsWeWant)
+        if (numActiveBeamsStrict - eps_fastdose <= numBeamsWeWant) {
+            stop = true;
             break;
-        else if (abs(numActiveBeamsStrict - numBeamsWeWant - 1) < eps_fastdose)
-            if (abs(loss_cpu[k_global] - loss_cpu[k_global-1]) < 1e-5f * loss_cpu[k_global])
+        } else if (abs(numActiveBeamsStrict - numBeamsWeWant - 1) < eps_fastdose) {
+            if (abs(loss_cpu[k_global] - loss_cpu[k_global-1]) < 1e-5f * loss_cpu[k_global]) {
+                stop = true;
                 break;
-        else if(numActiveBeamsStrict <= numBeamsWeWant * 1.05f)
-            if (abs(loss_cpu[k_global] - loss_cpu[k_global-1]) < 1e-7f * loss_cpu[k_global])
+            }
+        } else if (numActiveBeamsStrict <= numBeamsWeWant * 1.05f)
+            if (abs(loss_cpu[k_global] - loss_cpu[k_global-1]) < 1e-7f * loss_cpu[k_global]) {
+                stop = true;
                 break;
+            }
         if ((k_global + 1) % showTrigger == 0) {
             std::cout << "Iteration: " << k_global << ", cost: " << cost
                 << ", t: " << t << ", numActiveBeamsStrict: " << (int)numActiveBeamsStrict
                 << std::endl;
         }
 
-        if (k_global >= 1000 && (k_global + 1) % changeWeightsTrigger == 0) {
+        if ((k_global + 1) % changeWeightsTrigger == 0) {
             if (numActiveBeamsStrict >= 2 * numBeamsWeWant) {
                 elementWiseScale(beamWeights.data, 2.0f, numBeams);
             } else if (numActiveBeamsStrict >= 1.5f * numBeamsWeWant) {
@@ -159,6 +165,9 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
             }
         }
     }
+    if (k_global == iters_global)
+        stop = true;
+    
     if (nrm_cpu.size() != nrm.size) {
         std::cerr << "nrm_cpu size is supposed to be equal to nrm size." << std::endl;
         return 1;
@@ -173,7 +182,7 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
     return 0;
 }
 
-
+#if false
 bool IMRT::BeamOrientationOptimization(
     const std::vector<MatCSR_Eigen>& VOIMatrices,
     const std::vector<MatCSR_Eigen>& VOIMatricesT,
@@ -243,11 +252,10 @@ bool IMRT::BeamOrientationOptimization(
     #endif
 
     // prepare beam weights
-    std::vector<float> beamWeightsInit(numBeams, 0.0f);
+    Eigen::VectorXf beamWeightsInit(numBeams);
     beamWeightsInit_func(VOIMatrices_ptr, beamWeightsInit,
         weights_h.voxels_PTV, weights_h.voxels_OAR);
-    for (size_t i=0; i<numBeams; i++)
-        beamWeightsInit[i] *= params_h.beamWeight;
+    beamWeightsInit *= params_h.beamWeight;
     array_1d<float> beamWeights;
     arrayInit(beamWeights, numBeams);
     checkCudaErrors(cudaMemcpy(beamWeights.data, beamWeightsInit.data(),
@@ -364,6 +372,201 @@ bool IMRT::BeamOrientationOptimization(
     for (int i=0; i<params_h.numBeamsWeWant; i++) {
         activeBeams[i] = nrm_cpu_extend[i].first;
         activeNorms[i] = nrm_cpu_extend[i].second;
+        std::cout << activeBeams[i] << "  ";
+    }
+    std::cout << "\n\n";
+
+    return 0;
+}
+#endif
+
+
+bool IMRT::BeamOrientationOptimization(
+    const std::vector<MatCSR_Eigen>& VOIMatrices,
+    const std::vector<MatCSR_Eigen>& VOIMatricesT,
+    const std::vector<MatCSR_Eigen>& SpFluenceGrad,
+    const std::vector<MatCSR_Eigen>& SpFluenceGradT,
+    const Weights_h& weights_h, const Params& params_h,
+    const std::vector<uint8_t>& fluenceArray, 
+    std::vector<float>& costs, std::vector<int>& activeBeams,
+    std::vector<float>& activeNorms
+) {
+    size_t numBeams = VOIMatrices.size();
+    if (fluenceArray.size() % numBeams != 0) {
+        std::cerr << "fluenceArray size should be a multiple of numBeams." << std::endl;
+        return 1;
+    }
+    size_t numBeamletsPerBeam = fluenceArray.size() / numBeams;
+    if (VOIMatricesT.size() != numBeams ||
+        SpFluenceGrad.size() != numBeams ||
+        SpFluenceGradT.size() != numBeams) {
+        std::cerr << "The sizes of VOIMatrices, VOIMatricesT, SpFluenceGrad, "
+            "SpFluenceGradT should be equal" << std::endl;
+        return 1;
+    }
+    activeBeams.resize(numBeams);
+    for (size_t i=0; i<numBeams; i++)
+        activeBeams[i] = i;
+
+    std::vector<const MatCSR_Eigen*> VOIMatrices_ptr(numBeams, nullptr);
+    std::vector<const MatCSR_Eigen*> VOIMatricesT_ptr(numBeams, nullptr);
+    std::vector<const MatCSR_Eigen*> SpFluenceGrad_ptr(numBeams, nullptr);
+    std::vector<const MatCSR_Eigen*> SpFluenceGradT_ptr(numBeams, nullptr);
+    size_t numBeamlets = 0;
+    for (size_t i=0; i<numBeams; i++) {
+        VOIMatrices_ptr[i] = &VOIMatrices[i];
+        numBeamlets += VOIMatrices[i].getCols();
+    }
+    
+    // prepare CPU weights
+    Eigen::VectorXf xkm1_cpu(numBeamlets), vkm1_cpu(numBeamlets),
+        beamWeights_cpu(numBeams);
+    beamWeightsInit_func(VOIMatrices_ptr, beamWeights_cpu,
+        weights_h.voxels_PTV, weights_h.voxels_OAR);
+    beamWeights_cpu *= params_h.beamWeight;
+    std::srand(10086);
+    for (size_t i=0; i<numBeamlets; i++)
+        xkm1_cpu(i) = (float)std::rand() / RAND_MAX;
+    vkm1_cpu = xkm1_cpu;
+
+    // prepare constant GPU weights
+    array_1d<float> maxDose, minDoseTarget,
+        minDoseTargetWeights, maxWeightsLong, OARWeightsLong;
+    std::vector<array_1d<float>*> weight_targets{&maxDose, &minDoseTarget,
+        &minDoseTargetWeights, &maxWeightsLong, &OARWeightsLong};
+    std::vector<const std::vector<float>*> weight_sources{&weights_h.maxDose,
+        &weights_h.minDoseTarget, &weights_h.minDoseTargetWeights,
+        &weights_h.maxWeightsLong, &weights_h.OARWeightsLong};
+    for (int i=0; i<weight_targets.size(); i++) {
+        array_1d<float>& target = *weight_targets[i];
+        const std::vector<float>& source = *weight_sources[i];
+        size_t local_size = source.size();
+        arrayInit(target, local_size);
+        checkCudaErrors(cudaMemcpy(target.data, source.data(),
+            local_size*sizeof(float), cudaMemcpyHostToDevice));
+    }
+
+    // prepare scalars
+    float theta_km1, tkm1 = params_h.stepSize;
+    int k_global = 0;
+
+    #if slicingTiming
+        std::chrono::_V2::system_clock::time_point time0, time1, time2;
+        std::chrono::milliseconds duration;
+        time0 = std::chrono::high_resolution_clock::now();
+    #endif
+    std::cout << std::scientific << "\n\nBeam Orientation Optimization starts." << std::endl;
+    while (true) {
+        #if slicingTiming
+            time1 = std::chrono::high_resolution_clock::now();
+        #endif
+        // generate the matrices according to activeBeams
+        size_t numActiveBeams = activeBeams.size();
+        VOIMatrices_ptr.resize(numActiveBeams);
+        VOIMatricesT_ptr.resize(numActiveBeams);
+        SpFluenceGrad_ptr.resize(numActiveBeams);
+        SpFluenceGradT_ptr.resize(numActiveBeams);
+        for (size_t i=0; i<numActiveBeams; i++) {
+            size_t beamIdx = activeBeams[i];
+            VOIMatrices_ptr[i] = &VOIMatrices[beamIdx];
+            VOIMatricesT_ptr[i] = &VOIMatricesT[beamIdx];
+            SpFluenceGrad_ptr[i] = &SpFluenceGrad[beamIdx];
+            SpFluenceGradT_ptr[i] = &SpFluenceGradT[beamIdx];
+        }
+        MatCSR_Eigen A_Eigen, ATrans_Eigen, D_Eigen, DTrans_Eigen;
+        if (parallelMatCoalesce(A_Eigen, ATrans_Eigen, VOIMatrices_ptr, VOIMatricesT_ptr)) {
+            std::cerr << "Error coaleasing the beam-wise dose loading matrices "
+                "into a single matrix." << std::endl;
+            return 1;
+        }
+        if (diagBlock(D_Eigen, SpFluenceGrad_ptr) ||
+            diagBlock(DTrans_Eigen, SpFluenceGradT_ptr)) {
+            std::cerr << "Error coaleasing the beam-wise fluence map gradient operators "
+                "into a single matrix" << std::endl;
+            return 1;
+        }
+        #if slicingTiming
+            time2 = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(time2 - time1);
+            std::cout << "    Coaleasing beam-wise matrices time Elapsed: "
+                << duration.count() * 1e-3f << " [s]\n";
+        #endif
+
+        // Loading CPU matrices to GPU
+        MatCSR64 A, ATrans, D, DTrans;
+        if (Eigen2Cusparse(A_Eigen, A) || Eigen2Cusparse(ATrans_Eigen, ATrans) ||
+            Eigen2Cusparse(D_Eigen, D) || Eigen2Cusparse(DTrans_Eigen, DTrans)) {
+            std::cerr << "Error loading CPU matrices to GPU" << std::endl;
+            return 1;
+        }
+        array_1d<float> xkm1, vkm1, beamWeights;
+        arrayInit(xkm1, xkm1_cpu);
+        arrayInit(vkm1, vkm1_cpu);
+        arrayInit(beamWeights, beamWeights_cpu);
+        #if slicingTiming
+            time1 = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time2);
+            std::cout << "    Loading matrices and vectors to GPU time elapsed: "
+                << duration.count() * 1e-3f << " [s]\n";
+        #endif
+
+        // preparing x2d and x2dprox.
+        Eigen::Matrix<float, -1, -1, Eigen::RowMajor>
+            x2d_dense_host(numActiveBeams, numBeamletsPerBeam);
+        for (size_t i=0; i<numActiveBeams; i++) {
+            size_t beamIdx = activeBeams[i];
+            size_t offset_j = beamIdx * numBeamletsPerBeam;
+            for (size_t j=0; j<numBeamletsPerBeam; j++)
+                x2d_dense_host(i, j) = fluenceArray[offset_j + j] > 0;
+        }
+        MatCSR_Eigen x2d_sparse_host;
+        Eigen::SparseMatrix<float, Eigen::RowMajor, EigenIdxType>
+            *x2d_sparse_host_ptr = &x2d_sparse_host;
+        *x2d_sparse_host_ptr = x2d_dense_host.sparseView().pruned();
+        MatCSR64 x2d, x2dprox;
+        Eigen2Cusparse(x2d_sparse_host, x2d);
+        Eigen2Cusparse(x2d_sparse_host, x2dprox);
+
+        activeNorms.resize(numActiveBeams);
+        #if slicingTiming
+            time2 = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::milliseconds>(time2 - time1);
+            std::cout << "    Preparing x2d, x2dprox time elapsed: "
+                << duration.count() * 1e-3f << " [s]" << std::endl;
+        #endif
+
+        // begin optimization
+        float numActiveBeamsStrict = 0;
+        bool stop = false;
+        costs.resize(params_h.maxIter);
+        if (BOO_IMRT_L2OneHalf_gpu_QL (
+            A, ATrans, D, DTrans,
+            beamWeights, maxDose, minDoseTarget, minDoseTargetWeights,
+            maxWeightsLong, OARWeightsLong, numBeamletsPerBeam,
+            params_h.gamma, params_h.eta, params_h.showTrigger, params_h.changeWeightsTrigger,
+            k_global, params_h.maxIter, params_h.pruneTrigger, params_h.numBeamsWeWant,
+            theta_km1, tkm1, xkm1, vkm1, x2d, x2dprox,
+            costs, activeNorms, numActiveBeamsStrict, stop)) {
+            std::cerr << "BOO_IMRT_L2OneHalf_gpu_QL error." << std::endl;
+            return 1;
+        }
+        // beam reduction following.
+        DimReduction(activeBeams, beamWeights_cpu, xkm1_cpu, vkm1_cpu,
+            xkm1, vkm1, activeNorms, numActiveBeamsStrict, VOIMatrices);
+        if (stop)
+            break;
+    }
+
+    std::cout << "\n\nBeam Orientation Optimization finished." << std::endl;
+    #if slicingTiming
+        time1 = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time0);
+        std::cout << "Optimization iterations: " << k_global + 1 << ", time elapsed: "
+            << duration.count() * 1e-6f << " [s]" << std::endl;
+    #endif
+
+    std::cout << "Selected beams:\n";
+    for (int i=0; i<activeBeams.size(); i++) {
         std::cout << activeBeams[i] << "  ";
     }
     std::cout << "\n\n";
@@ -498,7 +701,7 @@ bool IMRT::FluencePolish(
     }
     if (diagBlock(D_Eigen, SpFluenceGrad_ptr) ||
         diagBlock(DTrans_Eigen, SpFluenceGradT_ptr)) {
-        std::cerr << "Error coaleasing the beam-wise fluence map gradient operators "
+        std::cerr << "Error coalescing the beam-wise fluence map gradient operators "
             "into a single matrix" << std::endl;
         return 1;
     }

@@ -187,7 +187,7 @@ bool IMRT::parallelMatCoalesce(
     const std::vector<const MatCSR_Eigen*>& VOIMatrices,
     const std::vector<const MatCSR_Eigen*>& VOIMatricesT
 ) {
-    #if slicingTiming
+    #if false
         auto time0 = std::chrono::high_resolution_clock::now();
     #endif
     // initialize VOImatT
@@ -230,7 +230,7 @@ bool IMRT::parallelMatCoalesce(
     
     VOImatT.customInit(numRowsTotal_matT, VOIMatricesT[0]->getCols(), nnzTotal_matT,
         VOImatT_offsets, VOImatT_columns, VOImatT_values);
-    #if slicingTiming
+    #if false
         auto time1 = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time1 - time0);
         std::cout << "VOImatT initialization time elapsed: " << duration.count() * 0.001f
@@ -289,7 +289,7 @@ bool IMRT::parallelMatCoalesce(
     }
     VOImat.customInit(VOImat_numRows, VOImat_numCols, nnzTotal_matT,
         m_offsets_VOImat, m_columns_VOImat, m_values_VOImat);
-    #if slicingTiming
+    #if false
         auto time2 = std::chrono::high_resolution_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(time2 - time1);
         std::cout << "VOImat initialization time elapsed: " << duration.count() * 0.001f

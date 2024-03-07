@@ -721,3 +721,84 @@ bool IMRT::bufferAllocate(MatCSR64& target, const array_1d<float>& input,
     checkCudaErrors(cudaMalloc(&(target.d_buffer_spmv), bufferSize));
     return 0;
 }
+
+
+bool IMRT::DimReduction(
+    std::vector<int>& activeBeams, Eigen::VectorXf& beamWeights_cpu,
+    Eigen::VectorXf& xkm1_cpu, Eigen::VectorXf& vkm1_cpu,
+    const array_1d<float>& xkm1, const array_1d<float>& vkm1,
+    const std::vector<float>& nrm_cpu, int numActiveBeamsStrict,
+    const std::vector<MatCSR_Eigen>& VOIMatrices
+) {
+    size_t numActiveBeams_old = activeBeams.size();
+    // firstly, select the remaining beams
+    //            global idx, local idx, norm value
+    std::vector<std::tuple<int, int, float>> rankings(numActiveBeams_old);
+    for (int i=0; i<numActiveBeams_old; i++) {
+        int globalIdx = activeBeams[i];
+        float normValue = nrm_cpu[i];
+        rankings[i] = std::make_tuple(globalIdx, i, normValue);
+    }
+    std::sort(rankings.begin(), rankings.end(),
+        [](const std::tuple<int, int, float>& a,
+            const std::tuple<int, int, float>& b) {
+                return std::get<2>(a) > std::get<2>(b);}
+    );
+    rankings.resize(numActiveBeamsStrict);
+
+    // obtain each beam's offset in xkm1 and number of active beamlets
+    //                    offset, size, indexed by localIdx
+    std::vector<std::pair<size_t, size_t>> fluenceOffset(numActiveBeams_old);
+    size_t offset_value = 0;
+    for (int i=0; i<numActiveBeams_old; i++) {
+        int globalIdx = activeBeams[i];
+        size_t localBeamlets = VOIMatrices[globalIdx].getCols();
+        fluenceOffset[i].second = localBeamlets;
+        fluenceOffset[i].first = offset_value;
+        offset_value += localBeamlets;
+    }
+
+    // calculate the new size of xkm1_cpu and vkm1_cpu
+    size_t newSize = 0;
+    for (int i=0; i<numActiveBeamsStrict; i++) {
+        int globalIdx = std::get<0>(rankings[i]);
+        size_t localBeamlets = VOIMatrices[globalIdx].getCols();
+        newSize += localBeamlets;
+    }
+
+    Eigen::VectorXf xkm1_copy(xkm1.size), vkm1_copy(vkm1.size);
+    checkCudaErrors(cudaMemcpy(xkm1_copy.data(), xkm1.data,
+        xkm1.size*sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(vkm1_copy.data(), vkm1.data,
+        vkm1.size*sizeof(float), cudaMemcpyDeviceToHost));
+
+    xkm1_cpu.resize(newSize);
+    vkm1_cpu.resize(newSize);
+    offset_value = 0;
+    for (int i=0; i<numActiveBeamsStrict; i++) {
+        size_t localIdx = std::get<1>(rankings[i]);
+        size_t currentBeamOffset = fluenceOffset[localIdx].first;
+        size_t currentBeamSize = fluenceOffset[localIdx].second;
+        for (int j=0; j<currentBeamSize; j++) {
+            xkm1_cpu[offset_value + j] = xkm1_copy[currentBeamOffset + j];
+            vkm1_cpu[offset_value + j] = vkm1_copy[currentBeamOffset + j];
+        }
+        offset_value += currentBeamSize;
+    }
+
+    // update beamWeights_cpu
+    Eigen::VectorXf beamWeights_copy(beamWeights_cpu.size());
+    beamWeights_copy = beamWeights_cpu;
+    beamWeights_cpu.resize(numActiveBeamsStrict);
+    for (int i=0; i<numActiveBeamsStrict; i++) {
+        size_t localIdx = std::get<1>(rankings[i]);
+        beamWeights_cpu(i) = beamWeights_copy(localIdx);
+    }
+
+    // lastly, update activeBeams
+    activeBeams.resize(numActiveBeamsStrict);
+    for (int i=0; i<numActiveBeamsStrict; i++)
+        activeBeams[i] = std::get<0>(rankings[i]);
+    
+    return 0;
+}

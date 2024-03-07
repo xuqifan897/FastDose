@@ -63,7 +63,8 @@ namespace IMRT {
         float& theta_km1, float& tkm1, array_1d<float>& xkm1, array_1d<float>& vkm1,
         MatCSR64& x2d, MatCSR64& x2dprox,
         // for result logging
-        std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu);
+        std::vector<float>& loss_cpu, std::vector<float>& nrm_cpu,
+        float& numActiveBeamsStrict, bool& stop);
 
 
     bool BeamOrientationOptimization(
@@ -76,6 +77,15 @@ namespace IMRT {
         std::vector<float>& costs, std::vector<int>& activeBeams,
         std::vector<float>& activeNorms
     );
+
+
+    bool DimReduction(
+        std::vector<int>& activeBeams, Eigen::VectorXf& beamWeights_cpu,
+        Eigen::VectorXf& xkm1_cpu, Eigen::VectorXf& vkm1_cpu,
+        const array_1d<float>& xkm1, const array_1d<float>& vkm1,
+        const std::vector<float>& nrm_cpu, int numActiveBeamsStrict,
+        const std::vector<MatCSR_Eigen>& VOIMatrices);
+
 
     bool polish_BOO_IMRT_gpu(
         const MatCSR64& A, const MatCSR64& ATrans,

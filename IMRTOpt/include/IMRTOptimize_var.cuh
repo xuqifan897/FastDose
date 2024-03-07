@@ -91,7 +91,7 @@ namespace IMRT {
 
     bool beamWeightsInit_func(
         const std::vector<const MatCSR_Eigen*>& VOIMatrices,
-        std::vector<float>& beamWeightsInit,
+        Eigen::VectorXf& beamWeightsInit,
         size_t ptv_voxels, size_t oar_voxels);
 
     // this function calculates tHat from nrm2 in-place.
