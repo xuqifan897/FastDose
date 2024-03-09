@@ -51,7 +51,7 @@ namespace IMRT {
         int maxIter;
         int showTrigger;
         int changeWeightsTrigger;
-        int pruneTrigger;
+        std::vector<int> pruneTrigger;
     };
 
     bool ParamsInit(Params& params);
@@ -66,6 +66,5 @@ namespace IMRT {
     MEMBER(int, maxIter) \
     MEMBER(int, showTrigger) \
     MEMBER(int, changeWeightsTrigger) \
-    MEMBER(int, pruneTrigger)
 
 #endif

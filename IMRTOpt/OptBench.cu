@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
         beamWeights_cu, maxDose_cu, minDoseTarget_cu, minDoseTargetWeights_cu,
         maxWeightsLong_cu, OARWeightsLong_cu,
         numBeamletsPerBeam, params.gamma, params.eta, params.showTrigger, params.changeWeightsTrigger,
-        k_global, params.maxIter, params.maxIter, params.numBeamsWeWant, theta_km1, tkm1,
+        k_global, params.maxIter, params.pruneTrigger, params.numBeamsWeWant, theta_km1, tkm1,
         xkm1_cu, vkm1_cu, x2d, x2dprox,
         loss_cpu, nrm_cpu, numActiveBeamsStrict, stop);
 }

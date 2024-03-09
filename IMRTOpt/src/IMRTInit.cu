@@ -384,7 +384,10 @@ bool IMRT::ParamsInit(Params& params) {
     params.maxIter = std::stoi(data[5][1]);
     params.showTrigger = std::stoi(data[6][1]);
     params.changeWeightsTrigger = std::stoi(data[7][1]);
-    params.pruneTrigger = std::stoi(data[8][1]);
+
+    params.pruneTrigger.resize(data[8].size() - 1);
+    for (int i=0; i<params.pruneTrigger.size(); i++)
+        params.pruneTrigger[i] = std::stoi(data[8][i+1]);
 
     std::vector<std::string> publicMemberValues;
     std::stringstream valueStream;
@@ -394,6 +397,9 @@ bool IMRT::ParamsInit(Params& params) {
     valueStream.str("");
 
     DECLARE_PUBLIC_MEMBERS
+    for (int i=0; i<params.pruneTrigger.size(); i++)
+        valueStream << params.pruneTrigger[i] << ", ";
+    publicMemberValues.push_back("pruneTrigger: " + valueStream.str());
 #undef MEMBER
 
     std::cout << std::scientific << std::setprecision(2) <<

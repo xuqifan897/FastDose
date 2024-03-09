@@ -17,6 +17,7 @@ add_subdirectory(FastDoseLib)
 add_subdirectory(FastDoseExample)
 add_subdirectory(PlanOptm)
 add_subdirectory(IMRTOpt)
+add_subdirectory(PreProcess)
 
 # option(ENABLE_KERNELGEN "Include the subdirectory for kernel generation, based on Geant4" OFF)
 # if (ENABLE_KERNELGEN)

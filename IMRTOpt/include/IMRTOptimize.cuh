@@ -59,7 +59,7 @@ namespace IMRT {
         const array_1d<float>& maxWeightsLong, const array_1d<float>& OARWeightsLong,
         size_t numBeamletsPerBeam, float gamma, float eta, int showTrigger, int changeWeightsTrigger,
         // variable
-        int& k_global, int iters_global, int iters_local, int numBeamsWeWant,
+        int& k_global, int iters_global, const std::vector<int>& pruneTrigger, int numBeamsWeWant,
         float& theta_km1, float& tkm1, array_1d<float>& xkm1, array_1d<float>& vkm1,
         MatCSR64& x2d, MatCSR64& x2dprox,
         // for result logging
@@ -82,9 +82,9 @@ namespace IMRT {
     bool DimReduction(
         std::vector<int>& activeBeams, Eigen::VectorXf& beamWeights_cpu,
         Eigen::VectorXf& xkm1_cpu, Eigen::VectorXf& vkm1_cpu,
-        const array_1d<float>& xkm1, const array_1d<float>& vkm1,
-        const std::vector<float>& nrm_cpu, int numActiveBeamsStrict,
-        const std::vector<MatCSR_Eigen>& VOIMatrices);
+        const array_1d<float>& beamWeights, const array_1d<float>& xkm1,
+        const array_1d<float>& vkm1, const std::vector<float>& nrm_cpu,
+        int numActiveBeamsStrict, const std::vector<MatCSR_Eigen>& VOIMatrices);
 
 
     bool polish_BOO_IMRT_gpu(

@@ -726,79 +726,68 @@ bool IMRT::bufferAllocate(MatCSR64& target, const array_1d<float>& input,
 bool IMRT::DimReduction(
     std::vector<int>& activeBeams, Eigen::VectorXf& beamWeights_cpu,
     Eigen::VectorXf& xkm1_cpu, Eigen::VectorXf& vkm1_cpu,
-    const array_1d<float>& xkm1, const array_1d<float>& vkm1,
-    const std::vector<float>& nrm_cpu, int numActiveBeamsStrict,
-    const std::vector<MatCSR_Eigen>& VOIMatrices
+    const array_1d<float>& beamWeights, const array_1d<float>& xkm1,
+    const array_1d<float>& vkm1, const std::vector<float>& nrm_cpu,
+    int numActiveBeamsStrict, const std::vector<MatCSR_Eigen>& VOIMatrices
 ) {
-    size_t numActiveBeams_old = activeBeams.size();
-    // firstly, select the remaining beams
-    //            global idx, local idx, norm value
-    std::vector<std::tuple<int, int, float>> rankings(numActiveBeams_old);
-    for (int i=0; i<numActiveBeams_old; i++) {
-        int globalIdx = activeBeams[i];
-        float normValue = nrm_cpu[i];
-        rankings[i] = std::make_tuple(globalIdx, i, normValue);
-    }
-    std::sort(rankings.begin(), rankings.end(),
-        [](const std::tuple<int, int, float>& a,
-            const std::tuple<int, int, float>& b) {
-                return std::get<2>(a) > std::get<2>(b);}
-    );
-    rankings.resize(numActiveBeamsStrict);
-
-    // obtain each beam's offset in xkm1 and number of active beamlets
-    //                    offset, size, indexed by localIdx
-    std::vector<std::pair<size_t, size_t>> fluenceOffset(numActiveBeams_old);
-    size_t offset_value = 0;
-    for (int i=0; i<numActiveBeams_old; i++) {
-        int globalIdx = activeBeams[i];
-        size_t localBeamlets = VOIMatrices[globalIdx].getCols();
-        fluenceOffset[i].second = localBeamlets;
-        fluenceOffset[i].first = offset_value;
-        offset_value += localBeamlets;
-    }
-
-    // calculate the new size of xkm1_cpu and vkm1_cpu
-    size_t newSize = 0;
-    for (int i=0; i<numActiveBeamsStrict; i++) {
-        int globalIdx = std::get<0>(rankings[i]);
-        size_t localBeamlets = VOIMatrices[globalIdx].getCols();
-        newSize += localBeamlets;
-    }
-
-    Eigen::VectorXf xkm1_copy(xkm1.size), vkm1_copy(vkm1.size);
+    Eigen::VectorXf beamWeights_copy(beamWeights.size),
+        xkm1_copy(xkm1.size), vkm1_copy(vkm1.size);
+    checkCudaErrors(cudaMemcpy(beamWeights_copy.data(), beamWeights.data,
+        beamWeights.size*sizeof(float), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(xkm1_copy.data(), xkm1.data,
         xkm1.size*sizeof(float), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(vkm1_copy.data(), vkm1.data,
         vkm1.size*sizeof(float), cudaMemcpyDeviceToHost));
 
-    xkm1_cpu.resize(newSize);
-    vkm1_cpu.resize(newSize);
-    offset_value = 0;
-    for (int i=0; i<numActiveBeamsStrict; i++) {
-        size_t localIdx = std::get<1>(rankings[i]);
-        size_t currentBeamOffset = fluenceOffset[localIdx].first;
-        size_t currentBeamSize = fluenceOffset[localIdx].second;
-        for (int j=0; j<currentBeamSize; j++) {
-            xkm1_cpu[offset_value + j] = xkm1_copy[currentBeamOffset + j];
-            vkm1_cpu[offset_value + j] = vkm1_copy[currentBeamOffset + j];
-        }
-        offset_value += currentBeamSize;
+    size_t numBeams_old = activeBeams.size();
+    if (beamWeights.size != numBeams_old
+        || nrm_cpu.size() != numBeams_old) {
+        std::cerr << "The sizes of activeBeams, beamWeights, "
+            "and nrm_cpu should be equal" << std::endl;
+        return 1;
     }
 
-    // update beamWeights_cpu
-    Eigen::VectorXf beamWeights_copy(beamWeights_cpu.size());
-    beamWeights_copy = beamWeights_cpu;
-    beamWeights_cpu.resize(numActiveBeamsStrict);
-    for (int i=0; i<numActiveBeamsStrict; i++) {
-        size_t localIdx = std::get<1>(rankings[i]);
-        beamWeights_cpu(i) = beamWeights_copy(localIdx);
+    // localIdx, globalIdx, dimension, xkm1_segment, vkm1_segment, beamWeight, norm
+    std::vector<std::tuple<int, int, int, Eigen::VectorXf, Eigen::VectorXf,
+        float, float>> rankings(numBeams_old);
+    size_t vector_offset = 0;
+    for (int i=0; i<numBeams_old; i++) {
+        int globalIdx = activeBeams[i];
+        int dimension = VOIMatrices[globalIdx].getCols();
+        std::get<0>(rankings[i]) = i;
+        std::get<1>(rankings[i]) = globalIdx;
+        std::get<2>(rankings[i]) = dimension;
+        std::get<3>(rankings[i]) = xkm1_copy.segment(vector_offset, dimension);
+        std::get<4>(rankings[i]) = vkm1_copy.segment(vector_offset, dimension);
+        vector_offset += dimension;
+        std::get<5>(rankings[i]) = beamWeights_copy(i);
+        std::get<6>(rankings[i]) = nrm_cpu[i];
     }
 
-    // lastly, update activeBeams
-    activeBeams.resize(numActiveBeamsStrict);
-    for (int i=0; i<numActiveBeamsStrict; i++)
-        activeBeams[i] = std::get<0>(rankings[i]);
+    std::sort(rankings.begin(), rankings.end(),
+        [](const std::tuple<int, int, int, Eigen::VectorXf, Eigen::VectorXf, float, float>& a,
+            std::tuple<int, int, int, Eigen::VectorXf, Eigen::VectorXf, float, float>& b) {
+                return std::get<6>(a) > std::get<6>(b);});
     
+    rankings.resize(numActiveBeamsStrict);
+    activeBeams.resize(numActiveBeamsStrict);
+    beamWeights_cpu.resize(numActiveBeamsStrict);
+    int dimension_new = 0;
+    for (int i=0; i<numActiveBeamsStrict; i++) {
+        activeBeams[i] = std::get<1>(rankings[i]);
+        beamWeights_cpu(i) = std::get<5>(rankings[i]);
+        dimension_new += std::get<2>(rankings[i]);
+    }
+    xkm1_cpu.resize(dimension_new);
+    vkm1_cpu.resize(dimension_new);
+    vector_offset = 0;
+    for (int i=0; i<numActiveBeamsStrict; i++) {
+        int dimension = std::get<2>(rankings[i]);
+        const Eigen::VectorXf xkm1_segment = std::get<3>(rankings[i]);
+        const Eigen::VectorXf vkm1_segment = std::get<4>(rankings[i]);
+        xkm1_cpu.segment(vector_offset, dimension) = xkm1_segment;
+        vkm1_cpu.segment(vector_offset, dimension) = vkm1_segment;
+        vector_offset += dimension;
+    }
     return 0;
 }

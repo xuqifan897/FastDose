@@ -1,5 +1,5 @@
 #!/bin/bash
-outputFolder="/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize"
+outputFolder="/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/optimize"
 if [ ! -d ${outputFolder} ]; then
     mkdir ${outputFolder}
 fi;
@@ -9,17 +9,17 @@ if true; then
         --phantomDim 220 220 149 \
         --voxelSize 0.25 0.25 0.25 \
         --SAD 100 \
-        --density "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw" \
-        --masks "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/structs.h5" \
+        --density "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/density.raw" \
+        --masks "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/structs.h5" \
         --primaryROI "PTV" \
         --bboxROI "BODY" \
-        --structureInfo "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
-        --params "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
-        --beamlist "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
+        --structureInfo "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
+        --params "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
+        --beamlist "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
         --mode 2 \
-        --deviceIdx 2 \
-        --spectrum "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
-        --kernel "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
+        --deviceIdx 3 \
+        --spectrum "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
+        --kernel "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
         --subFluenceDim 16 \
         --concurrency 1 \
         --outputFolder ${outputFolder} \
@@ -30,7 +30,7 @@ fi
 
 
 if false; then
-    resultFolder="/data/qifan/FastDoseWorkplace/BOOval/LUNG/experiment"
+    resultFolder="/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/experiment"
     if [ ! -d ${resultFolder} ]; then
         mkdir ${resultFolder}
     fi
@@ -46,24 +46,24 @@ if false; then
         --phantomDim 220 220 149 \
         --voxelSize 0.25 0.25 0.25 \
         --SAD 100 \
-        --density "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw" \
-        --masks "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/structs.h5" \
+        --density "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/density.raw" \
+        --masks "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/structs.h5" \
         --primaryROI "PTV" \
         --bboxROI "BODY" \
-        --structureInfo "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
-        --params "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
-        --beamlist "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
+        --structureInfo "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
+        --params "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
+        --beamlist "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
         --deviceIdx 3 \
-        --spectrum "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
-        --kernel "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
+        --spectrum "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
+        --kernel "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
         --subFluenceDim 16 \
         --concurrency 4 \
-        --outputFolder "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize" \
+        --outputFolder "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/optimize" \
         --nBeamsReserve 452
 fi
 
 if false; then
-    resultFolder="/data/qifan/FastDoseWorkplace/BOOval/LUNG/experiment"
+    resultFolder="/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/experiment"
         if [ ! -d ${resultFolder} ]; then
             mkdir ${resultFolder}
         fi
@@ -72,16 +72,16 @@ if false; then
         --phantomDim 220 220 149 \
         --voxelSize 0.25 0.25 0.25 \
         --SAD 100 \
-        --density "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/density.raw" \
-        --masks "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/structs.h5" \
+        --density "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/density.raw" \
+        --masks "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/structs.h5" \
         --primaryROI "PTV" \
         --bboxROI "BODY" \
-        --structureInfo "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
-        --params "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
-        --beamlist "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
+        --structureInfo "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/StructureInfo.csv" \
+        --params "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/params.txt" \
+        --beamlist "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/beamlist.txt" \
         --deviceIdx 3 \
-        --spectrum "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
-        --kernel "/data/qifan/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
+        --spectrum "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/spec_6mv.spec" \
+        --kernel "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/input/kernel_exp_6mv.txt" \
         --subFluenceDim 16 \
         --concurrency 1 \
         --outputFolder ${outputFolder} \

@@ -5,8 +5,8 @@ import h5py
 
 
 def doseAnalyze():
-    inputFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/experiment"
-    resultFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG/optimize"
+    inputFolder = "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/experiment"
+    resultFolder = "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/optimize"
     phantomShape = (149, 220, 220)
     VOI_exclude = ["Outer_Contour", "Skin", "RLL_ITV"]
 
