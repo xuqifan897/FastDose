@@ -8,6 +8,10 @@
 #include <opencv2/imgproc.hpp>
 #endif
 
+#include "PreProcessArgs.h"
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+
 PreProcess::BaseROIMask::~BaseROIMask() {}
 int PreProcess::BaseROIMask::writeToFile(std::string fname, bool verbose) {
     // open hdf5 file
@@ -211,8 +215,8 @@ bool PreProcess::ROI_init(
             printf("Structure found: #%d - %s\n",roi_idx+1, roi_name.c_str());
         }
         StructureSet roi;
-        if (!loadStructureSet(roi, rtstruct, roi_idx, verbose)) {
-            if (!verbose) std::cout << "Failed to load ROI Data for: \""<< roi_name <<"\"" << std::endl;
+        if (loadStructureSet(roi, rtstruct, roi_idx, verbose)) {
+            std::cout << "Failed to load ROI Data for: \""<< roi_name <<"\"" << std::endl;
             return 1;
         }
 
@@ -233,7 +237,10 @@ bool PreProcess::ROI_init(
                 }
             }
         }
+        roi_list.push_back(new DenseROIMask(roi_name, cropped_mask, roi_bbox));
+        std::cout << std::endl;
     }
+    return 0;
 }
 
 
@@ -323,4 +330,22 @@ PreProcess::Volume<uint8_t> PreProcess::generateContourMask(StructureSet& contou
   checkCudaErrors( cudaFreeArray(arrayMask) );
 
   return remask;
+}
+
+
+std::vector<std::string> PreProcess::ROIMaskList::getROINames(){
+    std::vector<std::string> names{};
+    for (const auto& roi : _coll) {
+        names.push_back( roi->name );
+    }
+    return names;
+}
+
+
+std::vector<uint64_t> PreProcess::ROIMaskList::getROICapacities() {
+    std::vector<uint64_t> capacities{};
+    for (const auto& roi : _coll) {
+        capacities.push_back( roi->nones() );
+    }
+    return capacities;
 }

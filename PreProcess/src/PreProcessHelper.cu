@@ -16,7 +16,7 @@ std::string PreProcess::get_username() {
 
 bool PreProcess::CreateIsoDensity(
     const FloatVolume& source, FloatVolume& target,
-    CTLUT* ctlut, bool verbose=false) {
+    CTLUT* ctlut, bool verbose) {
     float voxelSize = getarg<float>("voxelSize");
 
     /*    Build the input 3D texture    */

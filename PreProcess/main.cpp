@@ -3,6 +3,9 @@
 #include "rtstruct.h"
 #include "PreProcessROI.h"
 #include "PreProcessHelper.h"
+#include "PreProcessRingStruct.cuh"
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
 
 int main(int argc, char** argv) {
     if (PreProcess::argparse(argc, argv))
@@ -159,4 +162,23 @@ int main(int argc, char** argv) {
     PreProcess::ROIMaskList roi_list {};
     PreProcess::ROI_init(roi_list, roi_names,
         rtstruct, frameofref, ctdata, density, verbose);
+    if (PreProcess::CreateRingStructure(roi_list, rtstruct, ctdata, density, verbose)) {
+        std::cerr << "Error creating ring structure." << std::endl;
+        return 1;
+    }
+    std::cout << "Discovered " << roi_list.size() << " ROIs:\n";
+    uint idx = 0;
+    for (const auto& v : roi_list.getROINames()) {
+        idx++;
+        std::cout << "  " << idx << ": " << v << std::endl;
+    }
+    fs::path roi_list_output(PreProcess::getarg<std::string>("inputFolder"));
+    roi_list_output /= "roi_list.h5";
+    std::cout << "\nWriting ROI List to \"" << roi_list_output << "\"" << std::endl;
+    roi_list.writeToFile(roi_list_output.string());
+
+    fs::path densityFile(PreProcess::getarg<std::string>("inputFolder"));
+    densityFile /= std::string("density.raw");
+    PreProcess::write_debug_data<float>(density.data(), density.size,
+        densityFile.string().c_str(), verbose);
 }

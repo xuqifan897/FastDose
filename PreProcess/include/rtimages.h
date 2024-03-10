@@ -36,20 +36,7 @@
 #endif
 
 namespace PreProcess {
-    template<typename T>
-    int write_debug_data(T *mat, uint3 count, const char* filename, bool verbose=false) {
-        return write_debug_data<T>(mat, make_int3(count), filename, verbose);
-    }
-    template<typename T>
-    int write_binary_data(T *mat, uint3 count, const char* filename, bool verbose=false) {
-        return write_binary_data<T>(mat, make_int3(count), filename, verbose);
-    }
-    template<typename T>
-    int write_debug_data(T *mat, int3 count, const char* filename, bool verbose=false) {
-        char binfile[1024];
-        sprintf(binfile,"%s/%s.raw", get_username().c_str(),filename);
-        return write_binary_data<T>(mat, count, binfile, verbose);
-    }
+    std::string get_username();
 
     class RTImage {
     public:
@@ -194,6 +181,9 @@ namespace PreProcess {
 
     typedef unsigned int uint;
     int _write_file_version(H5::Group&, uint, uint, uint);
+
+    template<typename T>
+    int write_binary_data(T *mat, int3 count, const char* filename, bool verbose);
 
     template <typename T>
     class Volume {
@@ -395,6 +385,7 @@ namespace PreProcess {
         std::vector<std::string>& tokens, const std::string& delims);
 
     bool closeto(float a, float b, float tolerance=1e-6f);
+    struct ArrayProps;
     ArrayProps getROIExtents(const StructureSet& roi,
         const FrameOfReference& frame, bool verbose=false);
 }

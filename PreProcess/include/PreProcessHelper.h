@@ -124,6 +124,53 @@ namespace PreProcess {
             return true;
         }
     };
+
+    // template<typename T>
+    // int write_debug_data(T *mat, uint3 count, const char* filename, bool verbose=false) {
+    //     return write_debug_data<T>(mat, make_int3(count), filename, verbose);
+    // }
+    // template<typename T>
+    // int write_binary_data(T *mat, uint3 count, const char* filename, bool verbose=false) {
+    //     return write_binary_data<T>(mat, make_int3(count), filename, verbose);
+    // }
+    // template<typename T>
+    // int write_debug_data(T *mat, int3 count, const char* filename, bool verbose=false) {
+    //     const std::string& inputFolder = getarg<std::string>("inputFolder");
+    //     char binfile[1024];
+    //     sprintf(binfile,"%s/%s.raw", inputFolder, filename);
+    //     return write_binary_data<T>(mat, count, binfile, verbose);
+    // }
+
+    template<typename T>
+    int write_binary_data(T *mat, int3 count, const char* filename, bool verbose) {
+        // TODO: convert to c++ ofstream with metadata header/footer
+        FILE *binout;
+
+        if (verbose) {
+            std::cout << "binary data file name is \"" << filename << "\" with size: ("<<count.x << ", "<<count.y<<", "<<count.z<<")"<<std::endl;
+        }
+
+        if ( (binout = fopen(filename,"wb")) == NULL) {
+            printf("write_binary_data() failed with error (%d): %s\n", errno, std::strerror(errno));
+            return(-1); }
+
+        size_t sizer = count.x * count.y * count.z;
+
+        unsigned int entries = fwrite( (const void*)mat, sizeof(float), sizer, binout);
+
+        if ( entries != sizer){
+            printf("  Binary file has unexpected size! (%d / %lu)\n", entries, sizer);
+            fclose(binout);
+            return -2;
+        }
+
+        fclose(binout);
+        return(1);
+    }
+    template<typename T>
+    int write_debug_data(T *mat, uint3 count, const char* filename, bool verbose=false) {
+        return write_binary_data<T>(mat, make_int3(count), filename, verbose);
+    }
 }
 
 #endif

@@ -29,15 +29,14 @@ def print_hdf5_structure(item, indent=0):
 
 
 def readMasks():
-    patFolder = "/data/qifan/FastDoseWorkplace/BOOval/LUNG"
-    optFolder = os.path.join(patFolder, "experiment")
-    maskFile = os.path.join(optFolder, 'Dose_Coefficients.mask')
+    patFolder = "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/prep_output"
+    maskFile = os.path.join(patFolder, "roi_list.h5")
     file = h5py.File(maskFile, 'r')
     structures = file.keys()
     print(structures)
     
     # structName = 'PTV_ENLARGED'
-    structName = 'Skin'
+    structName = 'RingStructure'
     assert structName in structures, "The structure '{}' not in structures".format(structName)
     struct = file[structName]
     structProps = struct["ArrayProps"]
@@ -61,12 +60,12 @@ def readMasks():
         structCropStart[2]: structCropStart[2] + structCropSize[2]] = structMask
     
     # construct density matrix
-    densityFile = os.path.join(patFolder, 'tmp', 'density.raw')
+    densityFile = os.path.join(patFolder, 'density.raw')
     density = np.fromfile(densityFile, dtype=np.float32)
     density = np.reshape(density, structSize)
 
     # output figures
-    figurePath = os.path.join(patFolder, 'PTVShow')
+    figurePath = os.path.join(patFolder, 'RingStructShow')
     if not os.path.isdir(figurePath):
         os.mkdir(figurePath)
     nSlices = structSize[0]
@@ -630,7 +629,7 @@ def countNumBeamlets():
 
 if __name__ == '__main__':
     # examineMasks()
-    # readMasks()
+    readMasks()
     # examinePTV()
     # examineDcm()
     # maskAlign()
@@ -642,4 +641,4 @@ if __name__ == '__main__':
     # viewPVCSDose()
     # viewBEVDose()
     # BeamDoseView()
-    countNumBeamlets()
+    # countNumBeamlets()

@@ -26,7 +26,10 @@ bool PreProcess::argparse(int argc, char** argv) {
     ("ctlutFile", po::value<std::string>()->default_value(""),
         "The custom table to convert HU to mass density")
     ("voxelSize", po::value<float>()->default_value(0.25),
-        "Isotropic voxel size in [cm]");
+        "Isotropic voxel size in [cm]")
+    ("inputFolder", po::value<std::string>()->required(),
+        "The output folder of this program, the input folder of the optimization program, "
+        "where the Dose_Coefficients.mask is stored.");
 
     
     // to see if "--help" is in the argument
@@ -58,6 +61,8 @@ bool PreProcess::argparse(int argc, char** argv) {
         else if (auto ptr = boost::any_cast<std::vector<int>>(&value))
             second << *ptr;
         else if (auto ptr = boost::any_cast<std::string>(&value))
+            second << *ptr;
+        else if (auto ptr = boost::any_cast<bool>(&value))
             second << *ptr;
         else
             second << "(unknown type)";
