@@ -29,7 +29,9 @@ bool PreProcess::argparse(int argc, char** argv) {
         "Isotropic voxel size in [cm]")
     ("inputFolder", po::value<std::string>()->required(),
         "The output folder of this program, the input folder of the optimization program, "
-        "where the Dose_Coefficients.mask is stored.");
+        "where the Dose_Coefficients.mask is stored.")
+    ("dimFile", po::value<std::string>()->default_value("dimension.txt"),
+        "The dimension of the isotropic density file");
 
     
     // to see if "--help" is in the argument

@@ -181,4 +181,21 @@ int main(int argc, char** argv) {
     densityFile /= std::string("density.raw");
     PreProcess::write_debug_data<float>(density.data(), density.size,
         densityFile.string().c_str(), verbose);
+
+    // save structure list
+    fs::path dimFile(PreProcess::getarg<std::string>("inputFolder"));
+    dimFile /= PreProcess::getarg<std::string>("dimFile");
+    std::ofstream f(dimFile.string());
+    if (! f.is_open()) {
+        std::cerr << "Cannot open file " << dimFile << std::endl;
+        return 1;
+    }
+    float voxelSize = PreProcess::getarg<float>("voxelSize");
+    f << density.size.x << " " << density.size.y << " " << density.size.z
+        << "\n" << voxelSize << " " << voxelSize << " " << voxelSize << "\n";
+    for (const auto & v : roi_list.getROINames())
+        f << v << " ";
+    f.close();
+    
+    return 0;
 }

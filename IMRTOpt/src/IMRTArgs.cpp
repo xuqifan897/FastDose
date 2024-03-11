@@ -18,14 +18,16 @@ bool IMRT::argparse(int argc, char** argv) {
         "is the center of mass of the PTV volume")
     ("density", po::value<std::string>()->required(),
         "The path to the density raw file")
+    ("structures", po::value<std::vector<std::string>>()->multitoken()->required(),
+        "The list of structures")
     ("masks", po::value<std::string>()->required(),
         "The path to the masks file")
     ("primaryROI", po::value<std::string>()->required(),
         "The ROI to cover in dose calculation, which is typically the PTV area")
     ("bboxROI", po::value<std::string>()->required(),
         "The region within which to calculate the dose")
-    ("structureInfo", po::value<std::string>()->required(),
-        "The path to the file containing mask information")
+    ("structureInfo", po::value<std::string>(),
+        "The path to the file containing mask information, needed only for optimization")
     ("params", po::value<std::string>()->required(),
         "The path to the optimization parameters")
     ("beamlist", po::value<std::string>()->required(),
@@ -34,8 +36,7 @@ bool IMRT::argparse(int argc, char** argv) {
     // dose calculation
     ("mode", po::value<int>()->default_value(0),
         "0 for dose calculation and store the result, \n"
-        "1 for dose calculation and do beam orientation optimization, \n"
-        "2 for beam orientation optimization using the pre-calculated dose (0). \n"
+        "1 for beam orientation optimization using the pre-calculated dose (0). \n"
         "Dose is stored in the subdirectory \"doseMatFolder\" of the \"outputFolder\".")
     ("deviceIdx", po::value<int>()->default_value(2),
         "The device index")
@@ -103,6 +104,8 @@ bool IMRT::argparse(int argc, char** argv) {
         else if (auto ptr = boost::any_cast<std::vector<int>>(&value))
             second << *ptr;
         else if (auto ptr = boost::any_cast<std::string>(&value))
+            second << *ptr;
+        else if (auto ptr = boost::any_cast<std::vector<std::string>>(&value))
             second << *ptr;
         else
             second << "(unknown type)";

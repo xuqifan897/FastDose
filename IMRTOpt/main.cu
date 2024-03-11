@@ -29,15 +29,16 @@ int main(int argc, char** argv) {
     }
 
     std::vector<IMRT::StructInfo> structs;
-    if (IMRT::StructsInit(structs)) {
-        std::cerr << "Structure initialization error." << std::endl;
-        return 1;
-    }
-
     IMRT::MatCSREnsemble* matEns = nullptr;
-    if (mode == 0 || mode == 1) {
+    if (mode == 0) {
         // for mode 0, do dose calculation and store the result.
-        // for mode 1, do dose calculation and perform beam orientation optimization
+        // for mode 1, do beam orientation optimization
+        if (IMRT::StructsInit_dosecalc(structs)) {
+            std::cerr << "Structure initialization error In dose calculation."
+                << std::endl;
+            return 1;
+        }
+
         fd::DENSITY_h density_h;
         fd::DENSITY_d density_d;
         if (IMRT::densityInit(density_h, density_d, structs)) {
@@ -77,6 +78,12 @@ int main(int argc, char** argv) {
             return 0;
         }
         return 0; // ignore mode 1 at this time.
+    }
+
+    if (IMRT::StructsInit(structs)) {
+        std::cerr << "Structure initialization error in beam "
+            "orientation optimization." << std::endl;
+        return 1;
     }
 
     IMRT::Params params;

@@ -60,6 +60,30 @@ bool IMRT::StructsInit(std::vector<StructInfo>& structs, bool verbose) {
 }
 
 
+bool IMRT::StructsInit_dosecalc(std::vector<StructInfo>& structs, bool verbose) {
+    const std::vector<std::string> structures =
+        getarg<std::vector<std::string>>("structures");
+    for (int i=0; i<structures.size(); i++) {
+        structs.emplace_back(StructInfo());
+        StructInfo& last_struct = structs.back();
+        last_struct.name = structures[i];
+        // fill dummy values below
+        last_struct.maxWeights = 1.0f;
+        last_struct.maxDose = 1.0f;
+        last_struct.minDoseTargetWeights = 1.0f;
+        last_struct.minDoseTarget = 1.0f;
+        last_struct.OARWeights = 1.0f;
+        last_struct.IdealDose = 1.0f;
+    }
+
+    // load mask
+    const std::string maskFile = getarg<std::string>("masks");
+    readMaskFromHDF5(structs, maskFile);
+
+    return 0;
+}
+
+
 bool IMRT::readMaskFromHDF5(std::vector<StructInfo>& structs, const std::string& h5file) {
     struct IndexedString {
         uint16_t idx;

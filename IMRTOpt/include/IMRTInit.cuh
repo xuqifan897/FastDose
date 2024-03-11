@@ -27,6 +27,7 @@ namespace IMRT {
     std::ostream& operator<<(std::ostream& os, const StructInfo& obj);
 
     bool StructsInit(std::vector<StructInfo>& structs, bool verbose=true);
+    bool StructsInit_dosecalc(std::vector<StructInfo>& structs, bool verbose=true);
     bool readMaskFromHDF5(std::vector<StructInfo>& structs, const std::string& h5file);
 
     bool densityInit(fastdose::DENSITY_h& density_h,
