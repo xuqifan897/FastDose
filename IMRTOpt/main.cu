@@ -69,15 +69,14 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        if (mode == 0) {
-            fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-            doseMatFolder /= std::string("doseMatFolder");
-            matEns->tofile(doseMatFolder.string());
-            fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
-            IMRT::beamletFlagSave(beam_bundles, fluenceMapPath.string());
-            return 0;
-        }
-        return 0; // ignore mode 1 at this time.
+        fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
+        doseMatFolder /= std::string("doseMatFolder");
+        matEns->tofile(doseMatFolder.string());
+        fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
+        IMRT::beamletFlagSave(beam_bundles, fluenceMapPath.string());
+        fs::path doseDataPath = doseMatFolder / std::string("dose_data.h5");
+        IMRT::doseDataSave(beam_bundles, doseDataPath.string());
+        return 0;
     }
 
     if (IMRT::StructsInit(structs)) {

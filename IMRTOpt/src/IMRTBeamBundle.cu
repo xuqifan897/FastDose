@@ -1,4 +1,5 @@
 #include <iomanip>
+#include <H5Cpp.h>
 
 #include "helper_math.cuh"
 #include "math_constants.h"
@@ -581,5 +582,74 @@ bool IMRT::beamletFlagSave(const std::vector<BeamBundle>& beam_bundles,
     f.write((char*)outputBuffer.data(), totalNumElements*sizeof(uint8_t));
     f.close();
     std::cout << "Saving \"" << resultFile << "\" complets." << std::endl;
+    return 0;
+}
+
+
+bool IMRT::doseDataSave(const std::vector<BeamBundle>& beam_bundles,
+    const std::string& resultFile) {
+    int numBeams = beam_bundles.size();
+    std::vector<int> N_beamlets(numBeams, 0);
+    std::vector<float> gantry_rot_rad(numBeams, 0.0f);
+    std::vector<float> couch_rot_rad(numBeams, 0.0f);
+    std::vector<int> FmapDim(numBeams*2, 0);
+    int fluenceDim = getarg<int>("fluenceDim");
+    int maximumPossibleBeamlets = numBeams * fluenceDim * fluenceDim;
+    std::vector<int> column_labels;
+    column_labels.reserve(2 * maximumPossibleBeamlets);
+
+    for (int i=0; i<numBeams; i++) {
+        const std::vector<bool>& beamletFlag = beam_bundles[i].beamletFlag;
+        int num_beamlets = 0;
+        for (int j=0; j<beamletFlag.size(); j++)
+            num_beamlets += beamletFlag[j];
+        N_beamlets[i] = num_beamlets;
+        gantry_rot_rad[i] = beam_bundles[i].angles.x;
+        couch_rot_rad[i] = beam_bundles[i].angles.y;
+        FmapDim[2*i] = beam_bundles[i].fluenceDim.x;
+        FmapDim[2*i+1] = beam_bundles[i].fluenceDim.y;
+
+        for (int j=0; j<beamletFlag.size(); j++) {
+            if (beamletFlag[j]) {
+                column_labels.push_back(i);  // beam Idx
+                column_labels.push_back(j);  // beanlet Idx
+            }
+        }
+    }
+    
+    H5::H5File file(resultFile, H5F_ACC_TRUNC);
+
+    hsize_t N_beamlets_dims[1] = {(hsize_t)numBeams};
+    H5::DataSpace N_beamlets_dataspace(1, N_beamlets_dims);
+    H5::DataSet N_beamlets_dataset = file.createDataSet("N_beamlets",
+        H5::PredType::NATIVE_INT, N_beamlets_dataspace);
+    N_beamlets_dataset.write(N_beamlets.data(), H5::PredType::NATIVE_INT);
+
+    hsize_t gantry_dims[1] = {(hsize_t)numBeams};
+    H5::DataSpace gantry_dataspace(1, gantry_dims);
+    H5::DataSet gantry_dataset = file.createDataSet("gantry_rot_rad",
+        H5::PredType::NATIVE_FLOAT, gantry_dataspace);
+    gantry_dataset.write(gantry_rot_rad.data(), H5::PredType::NATIVE_FLOAT);
+    
+    hsize_t couch_dims[1] = {(hsize_t)numBeams};
+    H5::DataSpace couch_dataspace(1, couch_dims);
+    H5::DataSet couch_dataset = file.createDataSet("couch_rot_rad",
+        H5::PredType::NATIVE_FLOAT, couch_dataspace);
+    couch_dataset.write(couch_rot_rad.data(), H5::PredType::NATIVE_FLOAT);
+
+    hsize_t fmaps_dims_dims[2] = {(hsize_t)numBeams, 2};
+    H5::DataSpace fmap_dims_dataspace(2, fmaps_dims_dims);
+    H5::DataSet fmap_dims_dataset = file.createDataSet("fmap_dims",
+        H5::PredType::NATIVE_INT, fmap_dims_dataspace);
+    fmap_dims_dataset.write(FmapDim.data(), H5::PredType::NATIVE_INT);
+
+    hsize_t column_labels_dim[2] = {(hsize_t)column_labels.size(), 2};
+    H5::DataSpace column_labels_dataspace(2, column_labels_dim);
+    H5::DataSet column_labels_dataset = file.createDataSet("column_labels",
+        H5::PredType::NATIVE_INT, column_labels_dataspace);
+    column_labels_dataset.write(column_labels.data(), H5::PredType::NATIVE_INT);
+
+    column_labels_dataset.close();
+    std::cout << "Saving \"" << resultFile << " \" complets." << std::endl;
     return 0;
 }

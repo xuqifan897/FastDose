@@ -26,7 +26,9 @@ bool IMRT::DoseMatConstruction(
     checkCudaErrors(cudaEventCreate(&globalStop));
     float milliseconds;
 
-    int concurrency = getarg<int>("concurrency");
+    // To calculate the beamlet dose of several beams together.
+    // When concurrency is set to 1, calculate the dose for one beam at a time.
+    int concurrency = 1;
     float extent = getarg<float>("extent");
     int iterations = (beam_bundles.size() + concurrency - 1) / concurrency;
     std::vector<size_t> numRowsPerMat(iterations, 0);

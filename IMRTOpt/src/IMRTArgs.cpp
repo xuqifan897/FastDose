@@ -27,9 +27,9 @@ bool IMRT::argparse(int argc, char** argv) {
     ("bboxROI", po::value<std::string>()->required(),
         "The region within which to calculate the dose")
     ("structureInfo", po::value<std::string>(),
-        "The path to the file containing mask information, needed only for optimization")
-    ("params", po::value<std::string>()->required(),
-        "The path to the optimization parameters")
+        "The path to the file containing weight information, needed only for optimization")
+    ("params", po::value<std::string>(),
+        "The path to the optimization parameters, needed only for optimization")
     ("beamlist", po::value<std::string>()->required(),
         "The path to the beamlist")
     
@@ -57,8 +57,6 @@ bool IMRT::argparse(int argc, char** argv) {
         "which corresponds to the beamlet size")
     ("longSpacing", po::value<float>()->default_value(0.25),
         "Longitudinal voxel size in the dose calculation")
-    ("concurrency", po::value<int>()->default_value(8),
-        "How many beams whose beamlet dose matrices are computed concurrently")
     ("extent", po::value<float>()->default_value(2.0f),
         "Used in dose interpolation, i.e., the dose from BEV to PVCS. For voxels "
         "farther than the distance, the dose is 0 [cm]")

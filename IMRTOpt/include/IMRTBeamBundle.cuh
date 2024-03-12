@@ -42,6 +42,9 @@ namespace IMRT {
     bool beamletFlagSave(const std::vector<BeamBundle>& beam_bundles,
         const std::string& resultFile);
 
+    bool doseDataSave(const std::vector<BeamBundle>& beam_bundles,
+        const std::string& resultFile);
+
     __global__ void
     d_beamletFlagInit(
         fastdose::d_BEAM_d* beams_d, uint8_t* fmapOn,
