@@ -193,7 +193,7 @@ bool IMRT::beamletFlagInit(std::vector<BeamBundle>& beam_bundles,
     std::vector<fd::d_BEAM_d> beams_h(beams_init.size());
     for (int i=0; i<beams_init.size(); i++) {
         fd::d_BEAM_d& current_dest = beams_h[i];
-        const fd::BEAM_h current_source = beams_init[i];
+        const fd::BEAM_h& current_source = beams_init[i];
         current_dest.isocenter = current_source.isocenter;
         current_dest.beamlet_size = current_source.beamlet_size;
         current_dest.fmap_size = current_source.fmap_size;

@@ -145,7 +145,9 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
         if (numActiveBeamsStrict - eps_fastdose <= numBeamsWeWant) {
             stop = true;
             break;
-        } else if (abs(numActiveBeamsStrict - numBeamsWeWant - 1) < eps_fastdose) {
+        }
+        #if false
+        else if (abs(numActiveBeamsStrict - numBeamsWeWant - 1) < eps_fastdose) {
             if (abs(loss_cpu[k_global] - loss_cpu[k_global-1]) < 1e-5f * loss_cpu[k_global]) {
                 stop = true;
                 break;
@@ -155,6 +157,7 @@ bool IMRT::BOO_IMRT_L2OneHalf_gpu_QL (
                 stop = true;
                 break;
             }
+        #endif
         if ((k_global + 1) % showTrigger == 0) {
             std::cout << "Iteration: " << k_global << ", cost: " << cost
                 << ", t: " << t << ", numActiveBeamsStrict: " << (int)numActiveBeamsStrict
@@ -625,7 +628,13 @@ bool IMRT::resultDoseCalc(
 bool IMRT::writeResults(const std::vector<int>& activeBeams,
     const std::vector<MatCSR_Eigen>& MatricesT_full,
     const Eigen::VectorXf& xFull, const Eigen::VectorXf& finalDose) {
-    fs::path outputFolder(getarg<std::string>("outputFolder"));
+    const std::string& planFolder = getarg<std::string>("planFolder");
+    fs::path outputFolder;
+    if (planFolder == "") {
+        outputFolder = getarg<std::string>("outputFolder");
+    } else {
+        outputFolder = planFolder;
+    }
     const std::vector<int>& phantomDim = getarg<std::vector<int>>("phantomDim");
     std::stringstream metadata__;
     metadata__ << "Number of candidate beams: " << MatricesT_full.size()

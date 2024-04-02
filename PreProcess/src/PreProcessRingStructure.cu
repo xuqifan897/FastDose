@@ -160,8 +160,8 @@ bool PreProcess::CreateRingStructure(
     ROIMaskList& roi_list, RTStruct& rtstruct,
     const FloatVolume& ctdata, const FloatVolume& density, bool verbose
 ) {
-    const std::string ptv_name = getarg<std::string>("ptv_name");
-    const std::string bbox_name = getarg<std::string>("bbox_name");
+    const std::string& ptv_name = getarg<std::string>("ptv_name");
+    const std::string& bbox_name = getarg<std::string>("bbox_name");
 
     int ptv_idx = getROIIndex(rtstruct, ptv_name, true, verbose);
     int bbox_idx = getROIIndex(rtstruct, bbox_name, true, verbose);
@@ -256,5 +256,116 @@ bool PreProcess::CreateRingStructure(
     roi_list.push_back(new DenseROIMask(RingStruct_name, RingStruct_array, RingStruct_bbox));
 
     std::cout << "Ring structure added." << std::endl;
+    return 0;
+}
+
+
+bool PreProcess::CreateRingStructure(ROIMaskList& roi_list, const FloatVolume& density) {
+    const std::string& ptv_name = getarg<std::string>("ptv_name");
+    const std::string& bbox_name = getarg<std::string>("bbox_name");
+
+    // Find the PTV structure and body structure
+    std::shared_ptr<DenseROIMask> ptv_ptr = nullptr;
+    std::shared_ptr<DenseROIMask> bbox_ptr = nullptr;
+    bool ptv_found = false, bbox_found = false;
+    for (std::shared_ptr<DenseROIMask> a : roi_list._coll) {
+        if (!ptv_found && a->name == ptv_name) {
+            ptv_ptr = a;
+            ptv_found = true;
+        }
+        if (!bbox_found && a->name == bbox_name) {
+            bbox_ptr = a;
+            bbox_found = true;
+        }
+        if (ptv_found && bbox_found)
+            break;
+    }
+    if (!ptv_found || ! bbox_found) {
+        std::cerr << "Either the ptv or the bbox was not found." << std::endl;
+        return 1;
+    }
+
+    const std::vector<uint8_t>& ptv_mask_array = ptv_ptr->mask;
+    const std::vector<uint8_t>& bbox_mask_array = bbox_ptr->mask;
+    Volume<uint8_t> ptv_mask, bbox_mask;
+    ptv_mask.start = density.start;
+    ptv_mask.voxsize = density.voxsize;
+    ptv_mask.size = density.size;
+    ptv_mask.set_data((uint8_t*)ptv_mask_array.data(), ptv_mask.nvoxels());
+
+    bbox_mask.start = density.start;
+    bbox_mask.voxsize = density.voxsize;
+    bbox_mask.size = density.size;
+    bbox_mask.set_data((uint8_t*)bbox_mask_array.data(), bbox_mask.nvoxels());
+
+    // calculate the number of voxels in ptv_mask
+    int ptv_num_voxels = 0;
+    for (int i=0; i<ptv_mask._vect.size(); i++) {
+        ptv_num_voxels += (ptv_mask._vect[i] > 0);
+    }
+    float radius = 2 * powf(
+        3.0f * ptv_num_voxels / (4.0f * M_PI),
+        0.33333f);
+    radius = min(radius, 20.0f);
+    int radius_int = (int)round(radius);
+    int3 sphereSize{2*radius_int+1, 2*radius_int+1, 2*radius_int+1};
+    float3 sphereCenter{(float)radius_int, (float)radius_int, (float)radius_int};
+
+    size_t num_elements = sphereSize.x * sphereSize.y * sphereSize.z;
+    std::vector<uint8_t> sphereArray(num_elements, 0);
+    for (int k=0; k<sphereSize.z; k++) {
+        for (int j=0; j<sphereSize.y; j++) {
+            for (int i=0; i<sphereSize.x; i++) {
+                float3 coords{(float)i, (float)j, (float)k};
+                coords -= sphereCenter;
+                int sphereIdx = i + sphereSize.x * (j + sphereSize.y * k);
+                sphereArray[sphereIdx] = length(coords) < radius_int;
+            }
+        }
+    }
+
+    int3 gapSize{3, 3, 3};
+    std::vector<uint8_t> gapArray(gapSize.x * gapSize.y * gapSize.z, 1);
+
+    int3 ptv_size{(int)ptv_mask.size.x, (int)ptv_mask.size.y, (int)ptv_mask.size.z};
+    cudaVolume PTVcu(ptv_size);
+    int num_elements_ptv = ptv_size.x * ptv_size.y * ptv_size.z;
+    checkCudaErrors(cudaMemcpy(PTVcu._vect, ptv_mask._vect.data(),
+        num_elements_ptv*sizeof(uint8_t), cudaMemcpyHostToDevice));
+    
+    cudaVolume SPHERE_cu(sphereSize);
+    cudaVolume GAP_cu(gapSize);
+    checkCudaErrors(cudaMemcpy(SPHERE_cu._vect, sphereArray.data(),
+        sphereArray.size()*sizeof(uint8_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(GAP_cu._vect, gapArray.data(),
+        gapArray.size()*sizeof(uint8_t), cudaMemcpyHostToDevice));
+    
+    cudaVolume PTV_dilate_SPHERE, PTV_dilate_GAP;
+    if (imdilate(PTV_dilate_SPHERE, PTVcu, SPHERE_cu) ||
+        imdilate(PTV_dilate_GAP, PTVcu, GAP_cu)) {
+        return 1;
+    }
+
+    std::vector<uint8_t> PTV_dilate_SPHERE_cpu(num_elements_ptv, 0);
+    std::vector<uint8_t> PTV_dilate_GAP_cpu(num_elements_ptv, 0);
+    checkCudaErrors(cudaMemcpy(PTV_dilate_SPHERE_cpu.data(), PTV_dilate_SPHERE._vect,
+        num_elements_ptv*sizeof(uint8_t), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(PTV_dilate_GAP_cpu.data(), PTV_dilate_GAP._vect,
+        num_elements_ptv*sizeof(uint8_t), cudaMemcpyDeviceToHost));
+    
+    std::vector<uint8_t> RingStruct_array(num_elements_ptv, 0);
+    for (int i=0; i<num_elements_ptv; i++) {
+        RingStruct_array[i] = bbox_mask._vect[i] && PTV_dilate_SPHERE_cpu[i]
+        && (! PTV_dilate_GAP_cpu[i]);
+    }
+
+    std::string RingStruct_name("RingStructure");
+    ArrayProps RingStruct_bbox;
+    RingStruct_bbox.size = bbox_mask.size;
+    RingStruct_bbox.crop_size = bbox_mask.size;
+    RingStruct_bbox.crop_start = uint3{0, 0, 0};
+    roi_list.push_back(new DenseROIMask(RingStruct_name, RingStruct_array, RingStruct_bbox));
+
+    std::cout << "Ring Structure added." << std::endl;
     return 0;
 }

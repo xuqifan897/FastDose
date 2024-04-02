@@ -7,10 +7,8 @@
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
 
-int main(int argc, char** argv) {
-    if (PreProcess::argparse(argc, argv))
-        return 0;
 
+int PreProcess_mode0() {
     std::vector<std::string> roi_names;
     PreProcess::getROINamesFromJSON(PreProcess::getarg<
         std::string>("structuresFile"), roi_names);
@@ -198,4 +196,74 @@ int main(int argc, char** argv) {
     f.close();
     
     return 0;
+}
+
+
+int PreProcess_mode1() {
+    bool verbose = PreProcess::getarg<bool>("verbose");
+
+    // Initialize ctdata
+    PreProcess::FloatVolume ctdata{};
+    if (PreProcess::ctdataInitMode1(ctdata)) {
+        std::cerr << "Error initializing ctdata" << std::endl;
+        return 1;
+    }
+
+    PreProcess::FloatVolume density;
+    if (PreProcess::densityInitMode1(density, ctdata))
+        return 1;
+    PreProcess::FrameOfReference frameofref{density.size, density.start, density.voxsize};
+
+    std::cout << "LOADING OPTIMIZATION STRUCTURES" << std::endl;
+    PreProcess::ROIMaskList roi_list {};
+    PreProcess::ROIInitModel1(roi_list, ctdata);
+    if (PreProcess::CreateRingStructure(roi_list, density)) {
+        std::cerr << "Error creating ring structure." << std::endl;
+        return 1;
+    }
+    std::cout << "Discovered " << roi_list.size() << " ROIs:\n";
+    uint idx = 0;
+    for (const auto& v : roi_list.getROINames()) {
+        idx++;
+        std::cout << "  " << idx << ": " << v << std::endl;
+    }
+
+    fs::path roi_list_output(PreProcess::getarg<std::string>("inputFolder"));
+    roi_list_output /= "roi_list.h5";
+    std::cout << "\nWriting ROI List to \"" << roi_list_output << "\"" << std::endl;
+    roi_list.writeToFile(roi_list_output.string());
+
+    fs::path densityFile(PreProcess::getarg<std::string>("inputFolder"));
+    densityFile /= std::string("density.raw");
+    PreProcess::write_debug_data<float>(density.data(), density.size,
+        densityFile.string().c_str(), verbose);
+
+    // save structure list
+    fs::path dimFile(PreProcess::getarg<std::string>("inputFolder"));
+    dimFile /= PreProcess::getarg<std::string>("dimFile");
+    std::ofstream f(dimFile.string());
+    if (! f.is_open()) {
+        std::cerr << "Cannot open file " << dimFile << std::endl;
+        return 1;
+    }
+    float voxelSize = PreProcess::getarg<float>("voxelSize");
+    f << density.size.x << " " << density.size.y << " " << density.size.z
+        << "\n" << voxelSize << " " << voxelSize << " " << voxelSize << "\n";
+    for (const auto & v : roi_list.getROINames())
+        f << v << " ";
+    f.close();
+    
+    return 0;
+}
+
+
+int main(int argc, char** argv) {
+    if (PreProcess::argparse(argc, argv))
+        return 0;
+    
+    int mode = PreProcess::getarg<int>("mode");
+    if (mode == 0)
+        PreProcess_mode0();
+    else if (mode == 1)
+        PreProcess_mode1();
 }

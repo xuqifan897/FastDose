@@ -2,7 +2,10 @@
 #include "PreProcessArgs.h"
 #include <rapidjson/document.h>
 #include <rapidjson/filereadstream.h>
+#include <boost/filesystem.hpp>
 #include "helper_math.h"
+
+namespace fs = boost::filesystem;
 
 bool PreProcess::getROINamesFromJSON(const std::string& json_path,
     std::vector<std::string>& target) {
@@ -183,4 +186,137 @@ void PreProcess::tokenize_string(const std::string& str,
         lastpos = str.find_first_not_of(delims, nextpos);
         nextpos = str.find_first_of(delims, lastpos);
     }
+}
+
+
+bool PreProcess::ctdataInitMode1(PreProcess::FloatVolume& ctdata) {
+    // get dicom data size
+    const std::vector<int>& ctdata_size = PreProcess::getarg<std::vector<int>>("shape");
+    ctdata.size = make_uint3(ctdata_size[0], ctdata_size[1], ctdata_size[2]);
+    // get voxel dimensions, convert to cm
+    float voxelSize_scalar = PreProcess::getarg<float>("voxelSize");
+    ctdata.voxsize = make_float3(voxelSize_scalar, voxelSize_scalar, voxelSize_scalar);
+    ctdata.start = make_float3(0.f, 0.f, 0.f);
+
+    // prepare data
+    std::vector<uint16_t> phantomData_;
+    std::vector<float> phantomData;
+    const std::string& phantomPath = PreProcess::getarg<std::string>("phantomPath");
+    std::ifstream f(phantomPath);
+    if (f.is_open()) {
+        f.seekg(0, std::ios::end);
+        size_t file_size = f.tellg();
+        size_t numElements = file_size / sizeof(uint16_t);
+        if (numElements != ctdata_size[0] * ctdata_size[1] * ctdata_size[2]) {
+            std::cerr << "The phantom array has " << numElements << " elements, "
+            "inconsistent with the phantom size " << ctdata_size << std::endl;
+            return 1;
+        }
+        phantomData_.resize(numElements);
+        f.seekg(0, std::ios::beg);
+        f.read((char*)phantomData_.data(), numElements*sizeof(uint16_t));
+        f.close();
+    } else {
+        std::cerr << "Error: Unable to open file: " << phantomPath << std::endl;
+        return 1;
+    }
+
+    float RescaleSlope = getarg<float>("RescaleSlope");
+    float RescaleIntercept = getarg<float>("RescaleIntercept");
+    phantomData.resize(phantomData_.size());
+    for (int i=0; i<phantomData.size(); i++) {
+        float value = phantomData_[i] * RescaleSlope + RescaleIntercept;
+        value = std::min(value, DATAMAX);
+        value = std::max(value, DATAMIN);
+        phantomData[i] = value;
+    }
+
+    ctdata.set_data(phantomData.data(), ctdata.nvoxels());
+    return 0;
+}
+
+
+bool PreProcess::densityInitMode1(FloatVolume& density,
+    const FloatVolume& ctdata) {
+    auto ctLUT = CTLUT();
+    if (! getarg<bool>("nolut")) {
+        const std::string& ctlutFile = getarg<std::string>("ctlutFile");
+        if (ctlutFile != std::string("")) {
+            ctLUT.label = "User Specified";
+            if (!load_lookup_table(ctLUT, ctlutFile)) {
+                char msg[300];
+                sprintf(msg, "Failed to read from ct lookup table: \"%s\"", ctlutFile.c_str());
+                throw std::runtime_error(msg);
+            }
+        } else {
+            ctLUT.label = "Siemens (default)";
+            // LUT from: http://sbcrowe.net/ct-density-tables/
+            ctLUT.points.emplace_back("Air",           -969.8f, 0.f    ) ;
+            ctLUT.points.emplace_back("Lung 300",      -712.9f, 0.290f ) ;
+            ctLUT.points.emplace_back("Lung 450",      -536.5f, 0.450f ) ;
+            ctLUT.points.emplace_back("Adipose",       -95.6f,  0.943f ) ;
+            ctLUT.points.emplace_back("Breast",        -45.6f,  0.985f ) ;
+            ctLUT.points.emplace_back("Water",         -5.6f,   1.000f ) ;
+            ctLUT.points.emplace_back("Solid Water",   -1.9f,   1.016f ) ;
+            ctLUT.points.emplace_back("Brain",         25.7f,   1.052f ) ;
+            ctLUT.points.emplace_back("Liver",         65.6f,   1.089f ) ;
+            ctLUT.points.emplace_back("Inner Bone",    207.5f,  1.145f ) ;
+            ctLUT.points.emplace_back("B-200",         220.7f,  1.159f ) ;
+            ctLUT.points.emplace_back("CB2 30%",       429.9f,  1.335f ) ;
+            ctLUT.points.emplace_back("CB2 50%",       775.3f,  1.560f ) ;
+            ctLUT.points.emplace_back("Cortical Bone", 1173.7f, 1.823f ) ;
+        }
+        ctLUT.sort();
+        std::cout << ctLUT << std::endl;
+    }
+    if (CreateIsoDensity(ctdata, density, &ctLUT)) {
+        std::cout << "Failed reading CT data!" << std::endl;
+        return 1;
+    }
+    return 0;
+}
+
+
+bool PreProcess::ROIInitModel1(ROIMaskList& roi_list, const FloatVolume& ctdata) {
+    std::vector<std::string> roi_names;
+    PreProcess::getROINamesFromJSON(PreProcess::getarg<
+        std::string>("structuresFile"), roi_names);
+    std::cout << roi_names << std::endl;
+
+    std::string ptv_name = PreProcess::getarg<std::string>("ptv_name");
+    std::string bbox_name = PreProcess::getarg<std::string>("bbox_name");
+
+    fs::path maskFolder(getarg<std::string>("maskFolder"));
+    size_t numElements = ctdata.size.x * ctdata.size.y * ctdata.size.z;
+    for (const std::string& name : roi_names) {
+        fs::path file = maskFolder / (name + std::string(".bin"));
+        if (fs::is_regular_file(file)) {
+            std::vector<uint8_t> roi_mask(numElements);
+            std::ifstream f(file.string());
+            if (! f.is_open()) {
+                std::cerr << "Cannot open file: " << file;
+                return 1;
+            }
+            f.seekg(0, std::ios::end);
+            size_t numElementsRef = f.tellg() / sizeof(uint8_t);
+            if (numElementsRef != numElements) {
+                std::cerr << "The number of elements of the file " << numElementsRef
+                    << " is inconsistent with the mask shape: (" << ctdata.size.x 
+                    << ", " << ctdata.size.y << ", " << ctdata.size.z << ")" << std::endl;
+                return 1;
+            }
+            f.seekg(0, std::ios::beg);
+            f.read((char*)roi_mask.data(), numElements);
+            f.close();
+
+            // For simplicity, we include all the mask array without cropping
+            ArrayProps roi_bbox;
+            roi_bbox.size = ctdata.size;
+            roi_bbox.crop_size = ctdata.size;
+            roi_bbox.crop_start = make_uint3(0, 0, 0);
+            roi_list.push_back(new DenseROIMask(name, roi_mask, roi_bbox));
+            std::cout << "Creating ROI Mask: " << name << std::endl;
+        }
+    }
+    return 0;
 }
