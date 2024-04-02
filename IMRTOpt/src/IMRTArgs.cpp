@@ -65,7 +65,10 @@ bool IMRT::argparse(int argc, char** argv) {
         
     // io
     ("outputFolder", po::value<std::string>()->required(),
-        "Output folder")
+        "Folder to store the dose matrices")
+    ("planFolder", po::value<std::string>()->default_value(""),
+        "Folder to store the optimized plan. If unspecified, it defaults "
+        "to ${outputFolder}")
     
     // others
     ("nBeamsReserve", po::value<int>()->default_value(500),

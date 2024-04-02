@@ -1,13 +1,15 @@
-doseFolder = "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/prep_result/doseMatFolder";
+doseFolder = "/data/josh/demo/LiverDose/doseMatFolder";
 offsetsBufferFile = fullfile(doseFolder, "offsetsBuffer.bin");
 columnsBufferFile = fullfile(doseFolder, "columnsBuffer.bin");
 valuesBufferFile = fullfile(doseFolder, "valuesBuffer.bin");
 NonZeroElementsFile = fullfile(doseFolder, "NonZeroElements.bin");
 numRowsPerMat = fullfile(doseFolder, "numRowsPerMat.bin");
 
-dimensionFile = "/data/qifan/projects/FastDoseWorkplace/BOOval/LUNG/prep_output/dimension.txt";
-dimension = load(dimensionFile);
-return;
+dimensionFile = "/data/josh/demo/CT_prep/dimension.txt";
+dimensionText = fileread(dimensionFile);
+dimension = strtok(dimensionText, newline);
+dimension = strsplit(dimension);
+phantomdim = [str2num(dimension{1}), str2num(dimension{2}), str2num(dimension{3})];
 
 fid = fopen(offsetsBufferFile, 'rb');
 if fid == -1

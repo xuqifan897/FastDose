@@ -27,6 +27,9 @@ namespace PreProcess {
     );
     bool CreateRingStructure(ROIMaskList& roi_list, RTStruct& rtstruct,
         const FloatVolume& ctdata, const FloatVolume& density, bool verbose);
+    
+    // defined for mode 1
+    bool CreateRingStructure(ROIMaskList& roi_list, const FloatVolume& density);
 
     bool test_imdilate();
 }
