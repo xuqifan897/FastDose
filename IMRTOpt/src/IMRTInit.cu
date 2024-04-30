@@ -344,7 +344,7 @@ bool IMRT::specInit(fastdose::SPECTRUM_h& spectrum_h) {
 
 
 bool IMRT::kernelInit(fastdose::KERNEL_h& kernel_h) {
-    const std::string kernel_file = getarg<std::string>("kernel");
+    const std::string& kernel_file = getarg<std::string>("kernel");
     int nPhi = getarg<int>("nPhi");
     if (kernel_h.read_kernel_file(kernel_file, nPhi))
         return 1;
