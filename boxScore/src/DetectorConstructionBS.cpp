@@ -37,33 +37,33 @@ G4VPhysicalVolume* bs::DetectorConstruction::Construct()
     G4Element* elH = new G4Element(
         std::string("Hydrogen"), std::string("H"), 1., 1.01*g/mole);
     G4Element* elO = new G4Element(
-        std::string("Ocygen"), std::string("O"), 8., 16.00*g/mole); 
+        std::string("Oxygen"), std::string("O"), 8., 16.00*g/mole); 
     
     G4double density = 1.000*g/cm3;
     G4Material* water = new G4Material(std::string("water"), density, 2);
     water->AddElement(elH, 2);
     water->AddElement(elO, 1);
 
-    // density = 0.92*g/cm3;
-    density = 0.95610404*g/cm3;
+    density = 0.92*g/cm3;
+    // density = 0.95610404*g/cm3;
     G4Material* adipose = new G4Material(std::string("adipose"), density, 2);
     adipose->AddElement(elH, 2);
     adipose->AddElement(elO, 1);
 
-    // density = 1.04*g/cm3;
-    density = 1.0652606*g/cm3;
+    density = 1.04*g/cm3;
+    // density = 1.0652606*g/cm3;
     G4Material* muscle = new G4Material(std::string("muscle"), density, 2);
     muscle->AddElement(elH, 2);
     muscle->AddElement(elO, 1);
 
-    // density = 1.85*g/cm3;
-    density = 1.6093124*g/cm3;
+    density = 1.85*g/cm3;
+    // density = 1.6093124*g/cm3;
     G4Material* bone = new G4Material(std::string("bone"), density, 2);
     bone->AddElement(elH, 2);
     bone->AddElement(elO, 1);
 
-    // density = 0.25*g/cm3;
-    density = 0.2481199*g/cm3;
+    density = 0.25*g/cm3;
+    // density = 0.2481199*g/cm3;
     G4Material* lung = new G4Material(std::string("lung"), density, 2);
     lung->AddElement(elH, 2);
     lung->AddElement(elO, 1);

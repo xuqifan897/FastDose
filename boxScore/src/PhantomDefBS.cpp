@@ -27,11 +27,11 @@ bs::GeomDef::GeomDef()
 void bs::GeomDef::display()
 {
     // display spectrum information first
-    float EFluenceTotal = 0.;
+    float FluenceTotal = 0.;
     for (auto& it : Spec)
-        EFluenceTotal += std::get<1>(it);
-    std::cout << "The sum of total energy: " << std::setw(4) << 
-        std::setfill('0') << EFluenceTotal << std::endl << std::setfill(' ');
+        FluenceTotal += std::get<1>(it);
+    std::cout << "The sum of total fluence: " << std::setw(4) << 
+        std::setfill('0') << FluenceTotal << std::endl << std::setfill(' ');
     std::vector<float> photonCounts(Spec.size());
 
     float fluenceTotal = 0.f;
@@ -69,7 +69,7 @@ void bs::GeomDef::display()
     }
 }
 
-#if false
+#if true
 // original spectrum
 std::vector<std::tuple<float, float, int, int>> bs::Spec{
     {0.20, 0.001, 0, 0},

@@ -12,6 +12,7 @@ set(CUDA_ARCH 86)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -use_fast_math")
 
 add_subdirectory(boxScore)
+add_subdirectory(cubeScore)
 add_subdirectory(KernelGen)
 add_subdirectory(FastDoseLib)
 add_subdirectory(FastDoseExample)
