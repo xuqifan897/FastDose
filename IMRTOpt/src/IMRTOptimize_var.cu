@@ -9,7 +9,7 @@
 namespace fs = boost::filesystem;
 
 bool IMRT::OARFiltering(
-    const std::string& resultFolder, const std::vector<StructInfo>& structs,
+    const std::vector<std::string>& doseMatFolders, const std::vector<StructInfo>& structs,
     std::vector<MatCSR_Eigen>& MatricesT_full, std::vector<MatCSR_Eigen>& VOIMatrices,
     std::vector<MatCSR_Eigen>& VOIMatricesT,
     Weights_h& weights
@@ -19,12 +19,39 @@ bool IMRT::OARFiltering(
         std::cerr << "OAR filter and its transpose construction error." << std::endl;
         return 1;
     }
-    if (parallelSpGEMM(resultFolder, filter, filterT,
-        MatricesT_full, VOIMatrices, VOIMatricesT)) {
-        std::cerr << "CPU VOI dose loading matrices and their transpose "
-            "construction error." << std::endl;
-        return 1;
+
+    std::vector<std::vector<MatCSR_Eigen>> MatricesT_fullList(doseMatFolders.size());
+    std::vector<std::vector<MatCSR_Eigen>> VOIMatricesList(doseMatFolders.size());
+    std::vector<std::vector<MatCSR_Eigen>> VOIMatricesTList(doseMatFolders.size());
+    int totalNumMatrices = 0;
+    for (int i=0; i<doseMatFolders.size(); i++) {
+        if (parallelSpGEMM(doseMatFolders[i], filter, filterT,
+            MatricesT_fullList[i], VOIMatricesList[i], VOIMatricesTList[i])) {
+                std::cerr << "CPU VOI dose loading matrices and their transpose "
+                    "construction error in folder \"" << doseMatFolders[i] << "\"" << std::endl;
+                return 1;
+        }
+        totalNumMatrices += VOIMatricesList[i].size();
     }
+
+    MatricesT_full.resize(totalNumMatrices);
+    VOIMatrices.resize(totalNumMatrices);
+    VOIMatricesT.resize(totalNumMatrices);
+    int IdxOffset = 0;
+    for (int i=0; i<doseMatFolders.size(); i++) {
+        auto it = MatricesT_full.begin() + IdxOffset;
+        std::move(MatricesT_fullList[i].begin(), MatricesT_fullList[i].end(), it);
+
+        it = VOIMatrices.begin() + IdxOffset;
+        std::move(VOIMatricesList[i].begin(), VOIMatricesList[i].end(), it);
+
+        it = VOIMatricesT.begin() + IdxOffset;
+        std::move(VOIMatricesTList[i].begin(), VOIMatricesTList[i].end(), it);
+
+        int localNumMatrices = VOIMatricesList[i].size();
+        IdxOffset += localNumMatrices;
+    }
+
     return 0;
 }
 

@@ -631,7 +631,11 @@ bool IMRT::writeResults(const std::vector<int>& activeBeams,
     const std::string& planFolder = getarg<std::string>("planFolder");
     fs::path outputFolder;
     if (planFolder == "") {
-        outputFolder = getarg<std::string>("outputFolder");
+        if (getarg<std::vector<std::string>>("outputFolder").size() != 1) {
+            std::cerr << "Only one entry is expected in the argument outputFolder." << std::endl;
+            return 1;
+        }
+        outputFolder = getarg<std::vector<std::string>>("outputFolder")[0];
     } else {
         outputFolder = planFolder;
     }

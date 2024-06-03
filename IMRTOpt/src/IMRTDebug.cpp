@@ -16,7 +16,11 @@ bool IMRT::test_parallelSpGEMM(
     int numMatrices = matricesT.size();
 
     #if true
-        fs::path resultFolder(getarg<std::string>("outputFolder"));
+        if (getarg<std::vector<std::string>>("outputFolder").size() != 1) {
+            std::cerr << "Only one output folder expected" << std::endl;
+            return 1;
+        }
+        fs::path resultFolder(getarg<std::vector<std::string>>("outputFolder")[0]);
         resultFolder /= std::string("BeamDoseMatEigen");
         if (! fs::is_directory(resultFolder))
             fs::create_directory(resultFolder);

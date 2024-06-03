@@ -127,6 +127,13 @@ namespace IMRT {
 
     bool diagBlock(MatCSR_Eigen& target, const std::vector<const MatCSR_Eigen*>& source);
 
+    bool fluenceGradInitGroup(
+        std::vector<IMRT::MatCSR_Eigen>& SpFluenceGrad,
+        std::vector<IMRT::MatCSR_Eigen>& SpFluenceGradT,
+        std::vector<uint8_t>& fluenceArray,
+        const std::vector<std::string>& doseMatFolders
+    );
+
     bool fluenceGradInit(
         std::vector<IMRT::MatCSR_Eigen>& SpFluenceGrad,
         std::vector<IMRT::MatCSR_Eigen>& SpFluenceGradT,

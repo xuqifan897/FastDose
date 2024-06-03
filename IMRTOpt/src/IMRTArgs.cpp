@@ -64,8 +64,10 @@ bool IMRT::argparse(int argc, char** argv) {
         "Estimated number of non-zero elements per beam. Used to allocate the buffer")
         
     // io
-    ("outputFolder", po::value<std::string>()->required(),
-        "Folder to store the dose matrices")
+    ("outputFolder", po::value<std::vector<std::string>>()->multitoken()->required(),
+        "When in mode 0, or dose calculation mode, it contains only one folder, "
+        "which is the folder to store the dose matrix. When in mode 1, or optimization, "
+        "it's the list of folders from which to read the dose matrices.")
     ("planFolder", po::value<std::string>()->default_value(""),
         "Folder to store the optimized plan. If unspecified, it defaults "
         "to ${outputFolder}")

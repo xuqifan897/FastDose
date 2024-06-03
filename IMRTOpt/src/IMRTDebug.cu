@@ -93,7 +93,7 @@ bool IMRT::doseCalcDebug(
     std::cout << "Collective Terma calculation finished." << std::endl << std::endl;
 
     // log out data
-    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    fs::path resultFolder(getarg<std::vector<std::string>>("outputFolder")[0]);
     resultFolder /= std::string("doseCompDebug");
     if (! fs::is_directory(resultFolder))
         fs::create_directory(resultFolder);
@@ -234,7 +234,7 @@ bool IMRT::sparseValidation(const MatCSREnsemble* matEns) {
     size_t bufferSize = 0;
     void* dBuffer = nullptr;
 
-    fs::path resultFolder = fs::path(getarg<std::string>("outputFolder"));
+    fs::path resultFolder = fs::path(getarg<std::vector<std::string>>("outputFolder")[0]);
     resultFolder /= std::string("BeamDoseMat");
     if (! fs::is_directory(resultFolder))
         fs::create_directory(resultFolder);
@@ -351,7 +351,7 @@ bool IMRT::conversionValidation(
     std::cout << "Buffer size: " << bufferSize << " [bytes]" << std::endl;
     checkCudaErrors(cudaMalloc(&dBuffer, bufferSize));
 
-    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    fs::path resultFolder(getarg<std::vector<std::string>>("outputFolder")[0]);
     resultFolder /= std::string("BeamDoseMatNew");
     if (! fs::is_directory(resultFolder))
         fs::create_directory(resultFolder);
@@ -488,7 +488,7 @@ bool IMRT::test_MatCSR_load(const MatCSR_Eigen& input, const std::string& doseMa
     f.read((char*)numRowsPerMat.data(), numMatrices*sizeof(size_t));
     f.close();
 
-    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    fs::path resultFolder(getarg<std::vector<std::string>>("outputFolder")[0]);
     resultFolder /= std::string("BeamDoseMatEigen");
     if (! fs::is_directory(resultFolder))
         fs::create_directory(resultFolder);
@@ -708,7 +708,7 @@ bool IMRT::test_SpMatOAR(const MatCSR64& SpOARmat, const MatCSR64& SpOARmatT,
         checkCudaErrors(cudaEventCreate(&stop));
     #endif
 
-    fs::path resultFolder(getarg<std::string>("outputFolder"));
+    fs::path resultFolder(getarg<std::vector<std::string>>("outputFolder")[0]);
     resultFolder /= std::string("BeamDoseMat");
     if (! fs::is_directory(resultFolder))
         fs::create_directory(resultFolder);

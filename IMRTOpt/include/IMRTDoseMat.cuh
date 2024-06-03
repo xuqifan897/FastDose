@@ -131,7 +131,7 @@ namespace IMRT {
     bool OARFiltering(std::vector<MatCSR32>& OARMatricesT, const std::vector<MatCSR32>& matricesT,
         const MatCSR32& matFilter, const MatCSR32& matFilterT,
         int** d_bufferOffsets, int** d_bufferColumns, float** d_bufferValues);
-    bool OARFiltering(const std::string& resultFolder, const std::vector<StructInfo>& structs,
+    bool OARFiltering(const std::vector<std::string>& doseMatFolders, const std::vector<StructInfo>& structs,
         std::vector<MatCSR_Eigen>& MatricesT_full, std::vector<MatCSR_Eigen>& VOIMatrices,
         std::vector<MatCSR_Eigen>& VOIMatricesT,
         Weights_h& weights);

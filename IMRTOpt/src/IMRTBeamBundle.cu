@@ -581,7 +581,7 @@ bool IMRT::beamletFlagSave(const std::vector<BeamBundle>& beam_bundles,
     }
     f.write((char*)outputBuffer.data(), totalNumElements*sizeof(uint8_t));
     f.close();
-    std::cout << "Saving \"" << resultFile << "\" complets." << std::endl;
+    std::cout << "Saving \"" << resultFile << "\" completes." << std::endl;
     return 0;
 }
 
@@ -650,6 +650,6 @@ bool IMRT::doseDataSave(const std::vector<BeamBundle>& beam_bundles,
     column_labels_dataset.write(column_labels.data(), H5::PredType::NATIVE_INT);
 
     column_labels_dataset.close();
-    std::cout << "Saving \"" << resultFile << " \" complets." << std::endl;
+    std::cout << "Saving \"" << resultFile << " \" completes." << std::endl;
     return 0;
 }

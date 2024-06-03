@@ -69,7 +69,11 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
+        if (IMRT::getarg<std::vector<std::string>>("outputFolder").size() != 1) {
+            std::cerr << "Only one entry is expected in the argument \"outputFolder\"" << std::endl;
+            return 1;
+        }
+        fs::path doseMatFolder(IMRT::getarg<std::vector<std::string>>("outputFolder")[0]);
         doseMatFolder /= std::string("doseMatFolder");
         matEns->tofile(doseMatFolder.string());
         fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
@@ -96,22 +100,27 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    fs::path doseMatFolder(IMRT::getarg<std::string>("outputFolder"));
-    doseMatFolder /= std::string("doseMatFolder");
+    const std::vector<std::string>& outputFolder = 
+        IMRT::getarg<std::vector<std::string>>("outputFolder");
+    std::vector<std::string> doseMatFolders;
+    doseMatFolders.reserve(outputFolder.size());
+    for (int i=0; i<outputFolder.size(); i++) {
+        fs::path item = fs::path(outputFolder[i]) / std::string("doseMatFolder");
+        doseMatFolders.push_back(item.string());
+    }
     const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
     int SpMatT_ColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
     
-    if (IMRT::OARFiltering(doseMatFolder.string(), structs,
+    if (IMRT::OARFiltering(doseMatFolders, structs,
         MatricesT_full, VOIMatrices, VOIMatricesT, weights_h)) {
         std::cerr << "VOI matrices and their transpose initialization error." << std::endl;
         return 1;
     }
 
-    fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
-    if (IMRT::fluenceGradInit(SpFluenceGrad, SpFluenceGradT,
-        fluenceArray, fluenceMapPath.string())) {
+    if (IMRT::fluenceGradInitGroup(SpFluenceGrad, SpFluenceGradT,
+        fluenceArray, doseMatFolders)) {
         std::cerr << "Fluence gradient matrices and their transpose "
-            "initialiation error." << std::endl;
+            "initialization error." << std::endl;
         return 1;
     }
 

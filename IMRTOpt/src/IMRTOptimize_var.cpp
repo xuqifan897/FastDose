@@ -1,9 +1,59 @@
 #include <fstream>
 #include <chrono>
 #include <omp.h>
+#include <boost/filesystem.hpp>
 #include "IMRTDoseMatEigen.cuh"
 #include "IMRTOptimize_var.h"
 #include "IMRTArgs.h"
+
+namespace fs = boost::filesystem;
+
+bool IMRT::fluenceGradInitGroup(
+    std::vector<IMRT::MatCSR_Eigen>& SpFluenceGrad,
+    std::vector<IMRT::MatCSR_Eigen>& SpFluenceGradT,
+    std::vector<uint8_t>& fluenceArray,
+    const std::vector<std::string>& doseMatFolders
+) {
+    std::vector<std::vector<IMRT::MatCSR_Eigen>> SpFluenceGradList(doseMatFolders.size());
+    std::vector<std::vector<IMRT::MatCSR_Eigen>> SpFluenceGradTList(doseMatFolders.size());
+    std::vector<std::vector<uint8_t>> fluenceArrayList(doseMatFolders.size());
+
+    size_t totalNumBeams = 0;
+    size_t fluenceArraySize = 0;
+    for (int i=0; i<doseMatFolders.size(); i++) {
+        std::string fluenceMapPath = (fs::path(doseMatFolders[i]) /
+            std::string("fluenceMap.bin")).string();
+        if (IMRT::fluenceGradInit(SpFluenceGradList[i], SpFluenceGradTList[i],
+            fluenceArrayList[i], fluenceMapPath)) {
+            std::cerr << "Error processing the fluence map of path \""
+                << fluenceMapPath << "\"" << std::endl;
+            return 1;
+        }
+        totalNumBeams += SpFluenceGradList[i].size();
+        fluenceArraySize += fluenceArrayList[i].size();
+    }
+
+    SpFluenceGrad.resize(totalNumBeams);
+    SpFluenceGradT.resize(totalNumBeams);
+    fluenceArray.resize(fluenceArraySize);
+
+    size_t BeamIdxOffset = 0;
+    size_t fluenceArrayOffset = 0;
+    for (int i=0; i<doseMatFolders.size(); i++) {
+        auto it = SpFluenceGrad.begin() + BeamIdxOffset;
+        std::move(SpFluenceGradList[i].begin(), SpFluenceGradList[i].end(), it);
+
+        it = SpFluenceGradT.begin() + BeamIdxOffset;
+        std::move(SpFluenceGradTList[i].begin(), SpFluenceGradTList[i].end(), it);
+
+        auto fluenceIt = fluenceArray.begin() + fluenceArrayOffset;
+        std::move(fluenceArrayList[i].begin(), fluenceArrayList[i].end(), fluenceIt);
+
+        BeamIdxOffset += SpFluenceGradList[i].size();
+        fluenceArrayOffset += fluenceArrayList[i].size();
+    }
+    return 0;
+}
 
 
 bool IMRT::fluenceGradInit(
