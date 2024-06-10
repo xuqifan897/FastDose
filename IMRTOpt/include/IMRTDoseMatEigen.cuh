@@ -94,8 +94,8 @@ namespace IMRT {
     };
 
     bool parallelSpGEMM(const std::string& resultFolder, const MatCSR_Eigen& filter,
-        const MatCSR_Eigen& filterT, std::vector<MatCSR_Eigen>& MatricesT_full,
-        std::vector<MatCSR_Eigen>& OARMatrices, std::vector<MatCSR_Eigen>& OARMatricesT);
+        const MatCSR_Eigen& filterT, std::vector<MatCSR_Eigen*>& MatricesT_full,
+        std::vector<MatCSR_Eigen*>& OARMatrices, std::vector<MatCSR_Eigen*>& OARMatricesT);
     
     bool parallelMatCoalesce(MatCSR_Eigen& VOImat, MatCSR_Eigen& VOImatT,
         const std::vector<const MatCSR_Eigen*>& VOIMatrices,

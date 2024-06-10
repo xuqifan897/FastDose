@@ -20,36 +20,44 @@ bool IMRT::OARFiltering(
         return 1;
     }
 
-    std::vector<std::vector<MatCSR_Eigen>> MatricesT_fullList(doseMatFolders.size());
-    std::vector<std::vector<MatCSR_Eigen>> VOIMatricesList(doseMatFolders.size());
-    std::vector<std::vector<MatCSR_Eigen>> VOIMatricesTList(doseMatFolders.size());
-    int totalNumMatrices = 0;
+    // get the number of matrices for each doseMat
+    size_t totalNumMatrices = 0;
+    std::vector<size_t> numMatricesPerFolder(doseMatFolders.size(), 0);
     for (int i=0; i<doseMatFolders.size(); i++) {
+        fs::path NonZeroElementsFile = fs::path(doseMatFolders[i]) / "NonZeroElements.bin";
+        std::ifstream f(NonZeroElementsFile.string());
+        if (! f.is_open()) {
+            std::cerr << "Cannot open file: " << NonZeroElementsFile << std::endl;
+            return 1;
+        }
+        f.seekg(0, std::ios::end);
+        numMatricesPerFolder[i] = f.tellg() / sizeof(size_t);
+        f.close();
+        totalNumMatrices += numMatricesPerFolder[i];
+        std::cout << (int)(numMatricesPerFolder[i]) << " matrice found in folder \"" << doseMatFolders[i] << "\"\n";
+    }
+    MatricesT_full.resize(totalNumMatrices);
+    VOIMatrices.resize(totalNumMatrices);
+    VOIMatricesT.resize(totalNumMatrices);
+    
+    size_t offset = 0;
+    for (int i=0; i<doseMatFolders.size(); i++) {
+        int localNumMatrices = numMatricesPerFolder[i];
+        std::vector<MatCSR_Eigen*> MatricesT_full_local(localNumMatrices, nullptr);
+        std::vector<MatCSR_Eigen*> VOIMatrices_local(localNumMatrices, nullptr);
+        std::vector<MatCSR_Eigen*> VOIMatricesT_local(localNumMatrices, nullptr);
+        for (int j=0; j<localNumMatrices; j++) {
+            MatricesT_full_local[j] = MatricesT_full.data() + offset;
+            VOIMatrices_local[j] = VOIMatrices.data() + offset;
+            VOIMatricesT_local[j] = VOIMatricesT.data() + offset;
+            offset ++;
+        }
         if (parallelSpGEMM(doseMatFolders[i], filter, filterT,
-            MatricesT_fullList[i], VOIMatricesList[i], VOIMatricesTList[i])) {
+            MatricesT_full_local, VOIMatrices_local, VOIMatricesT_local)) {
                 std::cerr << "CPU VOI dose loading matrices and their transpose "
                     "construction error in folder \"" << doseMatFolders[i] << "\"" << std::endl;
                 return 1;
         }
-        totalNumMatrices += VOIMatricesList[i].size();
-    }
-
-    MatricesT_full.resize(totalNumMatrices);
-    VOIMatrices.resize(totalNumMatrices);
-    VOIMatricesT.resize(totalNumMatrices);
-    int IdxOffset = 0;
-    for (int i=0; i<doseMatFolders.size(); i++) {
-        auto it = MatricesT_full.begin() + IdxOffset;
-        std::move(MatricesT_fullList[i].begin(), MatricesT_fullList[i].end(), it);
-
-        it = VOIMatrices.begin() + IdxOffset;
-        std::move(VOIMatricesList[i].begin(), VOIMatricesList[i].end(), it);
-
-        it = VOIMatricesT.begin() + IdxOffset;
-        std::move(VOIMatricesTList[i].begin(), VOIMatricesTList[i].end(), it);
-
-        int localNumMatrices = VOIMatricesList[i].size();
-        IdxOffset += localNumMatrices;
     }
 
     return 0;

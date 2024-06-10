@@ -5,6 +5,8 @@
 #include "IMRTDoseMat.cuh"
 #include "IMRTInit.cuh"
 #include "IMRTOptimize.cuh"
+#include "boost/filesystem.hpp"
+namespace fs = boost::filesystem;
 
 bool IMRT::OARFiltering(
     const std::string& resultFolder,
@@ -18,11 +20,32 @@ bool IMRT::OARFiltering(
         return 1;
     }
     weights_d.fromHost(weights);
-    std::vector<MatCSR_Eigen> MatricesT_full;
-    std::vector<MatCSR_Eigen> VOIMatrices;
-    std::vector<MatCSR_Eigen> VOIMatricesT;
+
+    size_t totalNumMatrices = 0;
+    fs::path NonZeroElementsFile = fs::path(resultFolder) / "NonZeroElements.bin";
+    std::ifstream f(NonZeroElementsFile.string());
+    if (! f.is_open()) {
+        std::cerr << "Cannot open file: " << NonZeroElementsFile << std::endl;
+        return 1;
+    }
+    f.seekg(0, std::ios::end);
+    totalNumMatrices = f.tellg() / sizeof(size_t);
+    f.close();
+
+    std::vector<MatCSR_Eigen> MatricesT_full(totalNumMatrices);
+    std::vector<MatCSR_Eigen> VOIMatrices(totalNumMatrices);
+    std::vector<MatCSR_Eigen> VOIMatricesT(totalNumMatrices);
+
+    std::vector<MatCSR_Eigen*> MatricesT_full_t(totalNumMatrices, nullptr);
+    std::vector<MatCSR_Eigen*> VOIMatrices_t(totalNumMatrices, nullptr);
+    std::vector<MatCSR_Eigen*> VOIMatricesT_t(totalNumMatrices, nullptr);
+    for (int i=0; i<totalNumMatrices; i++) {
+        MatricesT_full_t[i] = MatricesT_full.data() + i;
+        VOIMatrices_t[i] = VOIMatrices.data() + i;
+        VOIMatricesT_t[i] = VOIMatricesT.data() + i;
+    }
     if (parallelSpGEMM(resultFolder, filter, filterT,
-        VOIMatrices, VOIMatricesT, MatricesT_full)) {
+        MatricesT_full_t, VOIMatrices_t, VOIMatricesT_t)) {
         std::cerr << "CPU VOI dose loading matrices and their transpose "
             "construction error." << std::endl;
         return 1;

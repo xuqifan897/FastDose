@@ -10,9 +10,9 @@ bool IMRT::parallelSpGEMM(
     const std::string& resultFolder,
     const MatCSR_Eigen& filter,
     const MatCSR_Eigen& filterT,
-    std::vector<MatCSR_Eigen>& MatricesT_full,
-    std::vector<MatCSR_Eigen>& VOIMatrices,
-    std::vector<MatCSR_Eigen>& VOIMatricesT
+    std::vector<MatCSR_Eigen*>& MatricesT_full,
+    std::vector<MatCSR_Eigen*>& VOIMatrices,
+    std::vector<MatCSR_Eigen*>& VOIMatricesT
 ) {
     #if true
         size_t number1 = 7195446;
@@ -80,7 +80,11 @@ bool IMRT::parallelSpGEMM(
             << " [s]"<< std::endl;
     #endif
 
-    MatricesT_full.resize(numMatrices);
+    // MatricesT_full.resize(numMatrices);
+    if (MatricesT_full.size() != numMatrices) {
+        std::cerr << "The number of matrices inconsistent." << std::endl;
+        return 1;
+    }
     std::vector<size_t> cumuNnz(numMatrices, 0);
     std::vector<size_t> cumuNumRows(numMatrices, 0);
     for (int i=1; i<numMatrices; i++) {
@@ -105,7 +109,7 @@ bool IMRT::parallelSpGEMM(
         std::copy(&h_valuesBuffer[local_cumuNnz],
             &h_valuesBuffer[local_cumuNnz+localNnz], m_values);
 
-        MatricesT_full[i].customInit(localNumRows, filter.getRows(), localNnz,
+        MatricesT_full[i]->customInit(localNumRows, filter.getRows(), localNnz,
             m_offsets, m_columns, m_values);
     }
     #if slicingTiming
@@ -126,8 +130,8 @@ bool IMRT::parallelSpGEMM(
     VOIMatricesT.resize(numMatrices);
     #pragma omp parallel for
     for (int i=0; i<numMatrices; i++) {
-        VOIMatricesT[i] = MatricesT_full[i] * filter;
-        VOIMatrices[i] = VOIMatricesT[i].transpose();
+        *VOIMatricesT[i] = *(MatricesT_full[i]) * filter;
+        *VOIMatrices[i] = VOIMatricesT[i]->transpose();
     }
     #if slicingTiming
         auto time3 = std::chrono::high_resolution_clock::now();
