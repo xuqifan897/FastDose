@@ -16,10 +16,22 @@ bool IMRT::BeamBundleInit(std::vector<BeamBundle>& beam_bundles,
     const fd::DENSITY_h& density_h,
     const std::vector<StructInfo>& structs
 ) {
-    // calculate the isocenter
-    const StructInfo& PTV_struct = structs[0];
-    const auto& PTV_mask = PTV_struct.mask;
-    const auto& PTV_size = PTV_struct.size;
+    const std::string& primaryROI = getarg<std::string>("primaryROI");
+    const StructInfo* primaryROIPtr = nullptr;
+    for (int i=0; i<structs.size(); i++) {
+        if (structs[i].name == primaryROI) {
+            primaryROIPtr = &structs[i];
+            break;
+        }
+    }
+    if (primaryROIPtr == nullptr) {
+        std::cerr << "Cannot find the primary ROI, " << primaryROI << " in structs" << std::endl;
+        return 1;
+    }
+    const StructInfo& PTV_struct = *primaryROIPtr;
+    const auto& PTV_mask = primaryROIPtr->mask;
+    const auto& PTV_size = primaryROIPtr->size;
+
 
     double3 isocenter{0.0, 0.0, 0.0};
     size_t PTV_nvoxels = 0;
@@ -218,8 +230,9 @@ bool IMRT::beamletFlagInit(std::vector<BeamBundle>& beam_bundles,
     checkCudaErrors(cudaMemset(fmapOn, 0, nElements*sizeof(uint8_t)));
 
     size_t fmap_npixels = beams_init[0].fmap_size.x * beams_init[0].fmap_size.y;
-    dim3 blockSize(((fmap_npixels + WARPSIZE - 1) / WARPSIZE) * WARPSIZE, 1, 1);
-    dim3 gridSize(beams_h.size(), 1, 1);
+    dim3 blockSize(1, 256, 1);
+    size_t nBlocks = (fmap_npixels + blockSize.y - 1) / blockSize.y;
+    dim3 gridSize(beams_h.size(), nBlocks, 1);
     d_beamletFlagInit<<<gridSize, blockSize, 0, stream>>>(beams_d, fmapOn,
         PTV_density.densityTex, PTV_density.VoxelSize, 3);
 
@@ -261,9 +274,11 @@ IMRT::d_beamletFlagInit(
 ) {
     int beam_idx = blockIdx.x;
     fd::d_BEAM_d beam = beams_d[beam_idx];
-    int beamlet_x = threadIdx.x % beam.fmap_size.x;
-    int beamlet_y = threadIdx.x / beam.fmap_size.x;
-    if (threadIdx.y >= beam.fmap_size.y)
+
+    int beamletIdx = threadIdx.y + blockIdx.y * blockDim.y;
+    int beamlet_x = beamletIdx % beam.fmap_size.x;
+    int beamlet_y = beamletIdx / beam.fmap_size.x;
+    if (beamlet_y >= beam.fmap_size.y)
         return;
     
     uint8_t* fmap_local = fmapOn + beam_idx * beam.fmap_size.x * beam.fmap_size.y;
@@ -297,7 +312,7 @@ IMRT::d_beamletFlagInit(
         if (current_beamlet_on)
             break;
     }
-    fmap_local[threadIdx.x] = current_beamlet_on;
+    fmap_local[beamletIdx] = current_beamlet_on;
 }
 
 

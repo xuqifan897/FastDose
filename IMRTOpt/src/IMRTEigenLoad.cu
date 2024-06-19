@@ -132,7 +132,8 @@ bool IMRT::getStructFilter (
                 * currentStruct.size.y * currentStruct.size.z;
         else if (nVoxels != currentStruct.size.x
             * currentStruct.size.y * currentStruct.size.z) {
-            std::cerr << "Number of voxels inconsistent among structures." << std::endl;
+            std::cerr << "Number of voxels inconsistent among structures. idx = "
+                << i << ", name = " << currentStruct.name << std::endl;
             return 1;
         }
         for (size_t j=0; j<nVoxels; j++)
