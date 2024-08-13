@@ -270,7 +270,20 @@ bool IMRT::densityInit(fd::DENSITY_h& density_h, fd::DENSITY_d& density_d,
     const std::vector<int>& phantomDim = getarg<std::vector<int>>("phantomDim");
 
     uint3 bbox_start, bbox_size;
-    const std::vector<uint8_t>& bbox = structs[1].mask;
+    const std::string& bbox_name = getarg<std::string>("bboxROI");
+    const StructInfo* bbox_ptr = nullptr;
+    for (int i=0; i<structs.size(); i++) {
+        if (structs[i].name == bbox_name) {
+            bbox_ptr = & structs[i];
+            break;
+        }
+    }
+    if (bbox_ptr == nullptr) {
+        std::cerr << "The bounding box structure " << bbox_name << " was not found" << std::endl;
+        return 1;
+    }
+    std::cout << "Bounding box structure name: " << bbox_name << std::endl;
+    const std::vector<uint8_t>& bbox = bbox_ptr->mask;
     const uint3& shape = structs[1].size;
     getBBox(bbox, shape, bbox_start, bbox_size);
     std::cout << "";
