@@ -282,6 +282,7 @@ bool IMRT::densityInit(fd::DENSITY_h& density_h, fd::DENSITY_d& density_d,
         std::cerr << "The bounding box structure " << bbox_name << " was not found" << std::endl;
         return 1;
     }
+    std::cout << "Bounding box structure name: " << bbox_name << std::endl;
     const std::vector<uint8_t>& bbox = bbox_ptr->mask;
     const uint3& shape = structs[1].size;
     getBBox(bbox, shape, bbox_start, bbox_size);
