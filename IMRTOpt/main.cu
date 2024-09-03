@@ -111,11 +111,28 @@ int main(int argc, char** argv) {
     const std::vector<int>& phantomDim = IMRT::getarg<std::vector<int>>("phantomDim");
     int SpMatT_ColsPerMat = phantomDim[0] * phantomDim[1] * phantomDim[2];
     
+    // initialize reference dose conditioned on SIB
+    std::vector<float>* referenceDose(nullptr);
+    if (IMRT::getarg<bool>("SIB")) {
+        std::cout << "SIB optimization enabled. Loading the reference dose." << std::endl;
+        const std::string& referenceDosePath = IMRT::getarg<std::string>("referenceDose");
+        std::ifstream file(referenceDosePath, std::ios::binary | std::ios::ate);
+        if (file.tellg() != SpMatT_ColsPerMat * sizeof(float)) {
+            std::cerr << "The size of the file " << referenceDosePath <<
+                " does not match phantom dimension " << phantomDim << std::endl;
+            return 1;
+        }
+        file.seekg(0, std::ios::beg);
+        referenceDose = new std::vector<float>(SpMatT_ColsPerMat, 0.0f);
+        file.read((char*)referenceDose->data(), SpMatT_ColsPerMat * sizeof(float));
+        file.close();
+    }
     if (IMRT::OARFiltering(doseMatFolders, structs,
-        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h)) {
+        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h, referenceDose)) {
         std::cerr << "VOI matrices and their transpose initialization error." << std::endl;
         return 1;
     }
+    if (IMRT::getarg<bool>("SIB")) delete referenceDose;
 
     if (IMRT::fluenceGradInitGroup(SpFluenceGrad, SpFluenceGradT,
         fluenceArray, doseMatFolders)) {

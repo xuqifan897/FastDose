@@ -76,7 +76,16 @@ bool IMRT::argparse(int argc, char** argv) {
     ("nBeamsReserve", po::value<int>()->default_value(500),
         "Reserve space for beam allocation")
     ("beamIdxDebug", po::value<int>()->default_value(0),
-        "For debug purposes. Which beam to use to debug");
+        "For debug purposes. Which beam to use to debug")
+
+    // for SIB plans
+    ("SIB", po::value<bool>()->default_value(false),
+        "To reproduce the simultaneous integrated boost (SIB) plans, where we "
+        "tried to use a given reference dose as ground truth, instead of a piece-wise constant "
+        "reference dose.")
+    ("referenceDose", po::value<std::string>()->default_value(""),
+        "The path to the reference dose for SIB, which is stored in float32 format. "
+        "Required when SIB is true");
 
     // to see if "--help" is in the argument
     if (argc == 1) {

@@ -12,10 +12,10 @@ bool IMRT::OARFiltering(
     const std::vector<std::string>& doseMatFolders, const std::vector<StructInfo>& structs,
     std::vector<MatCSR_Eigen>& MatricesT_full, std::vector<MatCSR_Eigen>& VOIMatrices,
     std::vector<MatCSR_Eigen>& VOIMatricesT,
-    Weights_h& weights
+    Weights_h& weights, const std::vector<float>* referenceDose
 ) {
     MatCSR_Eigen filter, filterT;
-    if (getStructFilter(filter, filterT, structs, weights)) {
+    if (getStructFilter(filter, filterT, structs, weights, referenceDose)) {
         std::cerr << "OAR filter and its transpose construction error." << std::endl;
         return 1;
     }

@@ -99,7 +99,8 @@ bool IMRT::OARFiltering(
 
 bool IMRT::getStructFilter (
     MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
-    const std::vector<StructInfo>& structs, Weights_h& weights
+    const std::vector<StructInfo>& structs, Weights_h& weights,
+    const std::vector<float>* referenceDose
 ) {
     #if slicingTiming
         auto time0 = std::chrono::high_resolution_clock::now();
@@ -228,11 +229,30 @@ bool IMRT::getStructFilter (
         float OARWeights = currentStruct.OARWeights;
         if (std::get<1>(currentEntry)) {
             // its a PTV
-            for (size_t ii=0; ii<current_num_voxels; ii++) {
-                weights.maxDose[offset0 + ii] = maxDose;
-                weights.maxWeightsLong[offset0 + ii] = maxWeights;
-                weights.minDoseTarget[offset0 + ii] = minDoseTarget;
-                weights.minDoseTargetWeights[offset0 + ii] = minDoseTargetWeights;
+            if (referenceDose == nullptr) {
+                // without SIB, using normal piece-wise constant parameters
+                for (size_t ii=0; ii<current_num_voxels; ii++) {
+                    weights.maxDose[offset0 + ii] = maxDose;
+                    weights.maxWeightsLong[offset0 + ii] = maxWeights;
+                    weights.minDoseTarget[offset0 + ii] = minDoseTarget;
+                    weights.minDoseTargetWeights[offset0 + ii] = minDoseTargetWeights;
+                }
+            } else {
+                // with SIB, use the reference dose
+                size_t ii_local = 0;
+                for (size_t jj=0; jj<nVoxels; jj++) {
+                    if (currentStruct.mask[jj] > 0) {
+                        weights.maxDose[offset0 + ii_local] = (*referenceDose)[jj];
+                        weights.maxWeightsLong[offset0 + ii_local] = maxWeights;
+                        weights.minDoseTarget[offset0 + ii_local] = (*referenceDose)[jj];
+                        weights.minDoseTargetWeights[offset0 + ii_local] = minDoseTargetWeights;
+                        ii_local ++;
+                    }
+                }
+                if (ii_local != current_num_voxels) {
+                    std::cerr << "Error, inconsistency in the current number of voxels." << std::endl;
+                    return 1;
+                }
             }
             offset0 += current_num_voxels;
             continue;

@@ -141,7 +141,8 @@ namespace IMRT {
         const std::string& fluenceMapPath);
 
     bool getStructFilter(MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
-        const std::vector<StructInfo>& structs, Weights_h& weights);
+        const std::vector<StructInfo>& structs, Weights_h& weights,
+        const std::vector<float>* referenceDose=nullptr);
     
     // size in bytes
     bool readBlockParallel(const std::string& filename, void** pointer, EigenIdxType* size);
