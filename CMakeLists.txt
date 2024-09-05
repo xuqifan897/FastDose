@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.0.0)
 project(FastDose LANGUAGES C CXX CUDA)
 
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_BUILD_TYPE Release)
 
 # Set the binary directory
@@ -10,6 +11,8 @@ file(MAKE_DIRECTORY ${BINARY_DIR})
 set(CUDA_ARCH 86)
 
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -use_fast_math")
+link_directories(/home/qifan/libraries/dcmtk/lib)
+link_directories(/home/qifan/libraries/boost/lib)
 
 add_subdirectory(cubeScore)
 add_subdirectory(KernelGen)

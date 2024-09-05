@@ -15,9 +15,12 @@ find_package(Boost REQUIRED COMPONENTS program_options filesystem)
 target_include_directories(preprocess PRIVATE ${Boost_INCLUDE_DIRS})
 target_link_libraries(preprocess PRIVATE Boost::program_options Boost::filesystem)
 
+find_package(CURL REQUIRED)
+
 find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
-target_include_directories(preprocess PRIVATE ${HDF5_INCLUDE_DIRS})
-target_link_libraries(preprocess PRIVATE 
+target_include_directories(preprocess PRIVATE ${HDF5_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS})
+target_link_libraries(preprocess PRIVATE
+    ${CURL_LIBRARIES}
     ${HDF5_CXX_HL_LIBRARIES}
     ${HDF5_CXX_LIBRARIES}
     ${HDF5_C_HL_LIBRARIES}

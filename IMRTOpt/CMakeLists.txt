@@ -23,6 +23,10 @@ find_package(Boost REQUIRED COMPONENTS program_options filesystem)
 target_include_directories(IMRT PRIVATE ${Boost_INCLUDE_DIRS})
 target_link_libraries(IMRT PRIVATE Boost::program_options Boost::filesystem)
 
+find_package(CURL REQUIRED)
+target_include_directories(IMRT PRIVATE ${CURL_INCLUDE_DIRS})
+target_link_libraries(IMRT PRIVATE ${CURL_LIBRARIES})
+
 find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
 target_include_directories(IMRT PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(IMRT PRIVATE 
@@ -42,10 +46,11 @@ target_link_libraries(IMRT PRIVATE OpenMP::OpenMP_CXX)
 target_compile_options(IMRT PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${OpenMP_CXX_FLAGS}>)
 
 add_executable(MaskGen MaskGen.cu)
-target_include_directories(MaskGen PRIVATE ${Boost_INCLUDE_DIRS})
+target_include_directories(MaskGen PRIVATE ${Boost_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS})
 target_link_libraries(MaskGen PRIVATE Boost::program_options Boost::filesystem)
 target_include_directories(MaskGen PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(MaskGen PRIVATE
+    ${CURL_LIBRARIES}
     ${HDF5_CXX_HL_LIBRARIES}
     ${HDF5_CXX_LIBRARIES}
     ${HDF5_C_HL_LIBRARIES}
@@ -69,10 +74,11 @@ set_target_properties(OptBench
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${BINARY_DIR})
 
-target_include_directories(OptBench PRIVATE ${Boost_INCLUDE_DIRS})
+target_include_directories(OptBench PRIVATE ${Boost_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS})
 target_link_libraries(OptBench PRIVATE Boost::program_options Boost::filesystem)
 target_include_directories(OptBench PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(OptBench PRIVATE
+    ${CURL_LIBRARIES}
     ${HDF5_CXX_HL_LIBRARIES}
     ${HDF5_CXX_LIBRARIES}
     ${HDF5_C_HL_LIBRARIES}

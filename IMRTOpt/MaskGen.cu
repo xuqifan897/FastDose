@@ -2,6 +2,7 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include <boost/filesystem.hpp>
 #include <H5Cpp.h>
 namespace fs = boost::filesystem;
