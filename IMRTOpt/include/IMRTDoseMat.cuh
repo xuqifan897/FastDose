@@ -133,8 +133,8 @@ namespace IMRT {
         int** d_bufferOffsets, int** d_bufferColumns, float** d_bufferValues);
     bool OARFiltering(const std::vector<std::string>& doseMatFolders, const std::vector<StructInfo>& structs,
         std::vector<MatCSR_Eigen>& MatricesT_full, std::vector<MatCSR_Eigen>& VOIMatrices,
-        std::vector<MatCSR_Eigen>& VOIMatricesT,
-        Weights_h& weights, const std::vector<float>* referenceDose);
+        std::vector<MatCSR_Eigen>& VOIMatricesT, Weights_h& weights,
+        const std::string& ptv, const std::vector<float>* referenceDose);
 }
 
 #endif

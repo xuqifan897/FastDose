@@ -127,8 +127,9 @@ int main(int argc, char** argv) {
         file.read((char*)referenceDose->data(), SpMatT_ColsPerMat * sizeof(float));
         file.close();
     }
+    const std::string& ptv = IMRT::getarg<std::string>("primaryROI");
     if (IMRT::OARFiltering(doseMatFolders, structs,
-        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h, referenceDose)) {
+        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h, ptv, referenceDose)) {
         std::cerr << "VOI matrices and their transpose initialization error." << std::endl;
         return 1;
     }

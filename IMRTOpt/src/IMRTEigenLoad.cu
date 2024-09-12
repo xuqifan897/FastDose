@@ -1,3 +1,4 @@
+
 #include <iomanip>
 #include <chrono>
 #include <Eigen/Dense>
@@ -12,10 +13,10 @@ bool IMRT::OARFiltering(
     const std::string& resultFolder,
     const std::vector<StructInfo>& structs,
     MatCSR64& SpVOIMat, MatCSR64& SpVOIMatT,
-    Weights_h& weights, Weights_d& weights_d
+    Weights_h& weights, Weights_d& weights_d, const std::string& ptv
 ) {
     MatCSR_Eigen filter, filterT;
-    if (getStructFilter(filter, filterT, structs, weights)) {
+    if (getStructFilter(filter, filterT, structs, weights, ptv)) {
         std::cerr << "OAR filter and its transpose construction error." << std::endl;
         return 1;
     }
@@ -99,7 +100,7 @@ bool IMRT::OARFiltering(
 
 bool IMRT::getStructFilter (
     MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
-    const std::vector<StructInfo>& structs, Weights_h& weights,
+    const std::vector<StructInfo>& structs, Weights_h& weights, const std::string& ptv,
     const std::vector<float>* referenceDose
 ) {
     #if slicingTiming
@@ -125,7 +126,7 @@ bool IMRT::getStructFilter (
         structs_valid.push_back(std::tuple<StructInfo, bool, size_t>(currentStruct, false, 0));
         auto & lastEntry = structs_valid.back();
         std::get<1>(lastEntry) = containsCaseInsensitive(
-            currentStruct.name, std::string("PTV"));
+            currentStruct.name, std::string("PTV")) || currentStruct.name == ptv;
 
         size_t localCount = 0;
         if (nVoxels == 0)
