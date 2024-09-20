@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
             A, ATrans, D, DTrans, xkm1,
             beamWeights, maxDose, minDoseTarget, minDoseTargetWeights,
             maxWeightsLong, OARWeightsLong, params);
-        return;
+        return 0;
     }
 
 
@@ -110,4 +110,6 @@ int main(int argc, char** argv) {
         k_global, params.maxIter, params.pruneTrigger, params.numBeamsWeWant, theta_km1, tkm1,
         xkm1_cu, vkm1_cu, x2d, x2dprox,
         loss_cpu, nrm_cpu, numActiveBeamsStrict, stop);
+    
+    return 0;
 }

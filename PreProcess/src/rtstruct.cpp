@@ -515,7 +515,7 @@ PreProcess::RTStruct::saveRTStructData( const char *outpath, ROI_DATA *new_roi_d
 
         DcmItem *observationSequenceItem;
         format.getDataset()->findAndGetSequenceItem(DCM_RTROIObservationsSequence, observationSequenceItem, i );
-        observationSequenceItem->putAndInsertString(DCM_RETIRED_ROIObservationLabel, new_roi_data[i].roi_name.data() );
+        observationSequenceItem->putAndInsertString(DCM_ROIObservationLabel, new_roi_data[i].roi_name.data() );
         observationSequenceItem->putAndInsertString(DCM_ObservationNumber, newNumber );
         observationSequenceItem->putAndInsertString(DCM_ReferencedROINumber, newNumber );
     }

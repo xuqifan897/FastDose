@@ -13,7 +13,6 @@ set_target_properties(FastDose
     LIBRARY_OUTPUT_DIRECTORY ${BINARY_DIR}
 )
 
-find_package(CUDA REQUIRED)
 target_include_directories(FastDose PRIVATE ${CUDA_INCLUDE_DIRS})
 target_link_libraries(FastDose PRIVATE)
 set_property(TARGET FastDose

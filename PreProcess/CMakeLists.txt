@@ -8,7 +8,6 @@ set_target_properties(preprocess
 )
 target_include_directories(preprocess PRIVATE ./include)
 
-find_package(CUDA REQUIRED)
 target_include_directories(preprocess PRIVATE ${CUDA_INCLUDE_DIRS})
 
 find_package(Boost REQUIRED COMPONENTS program_options filesystem)

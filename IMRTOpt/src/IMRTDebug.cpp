@@ -1,6 +1,7 @@
 #include <random>
 #include <omp.h>
 #include <mutex>
+#include <fstream>
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
 #include "IMRTDoseMatEigen.cuh"

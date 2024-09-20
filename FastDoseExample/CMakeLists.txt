@@ -4,7 +4,6 @@ target_link_libraries(example
     FastDose
 )
 
-find_package(CUDA REQUIRED)
 target_include_directories(example PRIVATE ${CUDA_INCLUDE_DIRS})
 
 set_target_properties(example

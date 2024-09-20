@@ -78,8 +78,8 @@ int main(int argc, char** argv) {
         matEns->tofile(doseMatFolder.string());
         fs::path fluenceMapPath = doseMatFolder / std::string("fluenceMap.bin");
         IMRT::beamletFlagSave(beam_bundles, fluenceMapPath.string());
-        fs::path doseDataPath = doseMatFolder / std::string("dose_data.h5");
-        IMRT::doseDataSave(beam_bundles, doseDataPath.string());
+        // fs::path doseDataPath = doseMatFolder / std::string("dose_data.h5");
+        // IMRT::doseDataSave(beam_bundles, doseDataPath.string());
         return 0;
     }
 
@@ -127,9 +127,8 @@ int main(int argc, char** argv) {
         file.read((char*)referenceDose->data(), SpMatT_ColsPerMat * sizeof(float));
         file.close();
     }
-    const std::string& ptv = IMRT::getarg<std::string>("primaryROI");
     if (IMRT::OARFiltering(doseMatFolders, structs,
-        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h, ptv, referenceDose)) {
+        MatricesT_full, VOIMatrices, VOIMatricesT, weights_h, referenceDose)) {
         std::cerr << "VOI matrices and their transpose initialization error." << std::endl;
         return 1;
     }

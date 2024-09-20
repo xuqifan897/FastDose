@@ -50,6 +50,16 @@ bool IMRT::StructsInit(std::vector<StructInfo>& structs, bool verbose) {
         last_struct.minDoseTarget = std::stof(tokens[4]);
         last_struct.OARWeights = std::stof(tokens[5]);
         last_struct.IdealDose = std::stof(tokens[6]);
+
+        // Safety check
+        if (last_struct.minDoseTargetWeights > eps_fastdose &&
+            last_struct.OARWeights > eps_fastdose) {
+            std::cerr << "Positive minDoseTargetWeights means one structure is a PTV, "
+                "positive OARWeights means one structure is an OAR. However, structure "
+                << last_struct.name << " has both positive minDoseTargetWeights and positive "
+                "OARWeights." << std::endl;
+            return 1;
+        }
     }
 
     // load mask

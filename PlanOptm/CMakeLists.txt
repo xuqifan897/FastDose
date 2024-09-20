@@ -5,7 +5,6 @@ add_executable(PlanOptm ${PlanOptmSources} ${PlanOptmHeaders})
 target_link_libraries(PlanOptm PRIVATE FastDose)
 target_link_libraries(PlanOptm PRIVATE cusparse)
 
-find_package(CUDA REQUIRED)
 target_include_directories(PlanOptm PRIVATE ${CUDA_INCLUDE_DIRS})
 
 set_target_properties(PlanOptm

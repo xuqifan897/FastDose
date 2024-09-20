@@ -109,7 +109,7 @@ namespace IMRT {
     bool OARFiltering(const std::string& resultFolder,
         const std::vector<StructInfo>& structs,
         MatCSR64& SpVOImat, MatCSR64& SpVOImatT,
-        Weights_h& weights, Weights_d& weights_d, const std::string& ptv);
+        Weights_h& weights, Weights_d& weights_d);
 
     bool fluenceGradInit(MatCSR64& SpFluenceGrad, MatCSR64& SpFluenceGradT,
         std::vector<uint8_t>& fluenceArray, const std::string& fluenceMapPath,
@@ -141,7 +141,7 @@ namespace IMRT {
         const std::string& fluenceMapPath);
 
     bool getStructFilter(MatCSR_Eigen& filter, MatCSR_Eigen& filterT,
-        const std::vector<StructInfo>& structs, Weights_h& weights, const std::string& ptv,
+        const std::vector<StructInfo>& structs, Weights_h& weights,
         const std::vector<float>* referenceDose=nullptr);
     
     // size in bytes

@@ -1,90 +1,61 @@
-# Fast dose calculation & optimization
-This software framework provides an efficient solution for dose calculation and treatment plan optimization in external-beam radiation therapy, addressing the growing need for faster and more adaptable treatment planning methods. Particularly suited for complex cases involving non-coplanar, non-isocentric beam configurations, it offers unprecedented speed and versatility.
-## Introduction
-The emergence of non-coplanar, non-isocentric, and multimodal treatment planning poses significant challenges to current dose calculation and optimization methods due to increased complexity. Previous attempts \[[1](https://doi.org/10.1118/1.3551996), [2](https://doi.org/10.1118/1.4895822)\] have focused on accelerating the dose calculation process. However, with advancements in modern GPU performance and library support, there is ample opportunity to enhance existing algorithms. In this work, we present an integrated framework utilizing GPU technology, seamlessly coupling dose calculation and treatment plan optimization to achieve unparalleled speed-ups.
+# Fast Dose Calculation & Optimization
+This project provides a comprehensive solution for accelerated external X-ray beam treatment planning, with a special focus on computationally intensive $4\pi$ treatment techniques. The core modules include:
+1.	Preprocessing module,
+2.	Dose calculation module,
+3.	Treatment optimization module.
 
-The framework comprises three main components:
-* Preprocessing: This stage involves processing DICOM image files and structure annotations to produce a resampled isotropic phantom and anatomy masks.
-* Dose calculation: Here, the user specifies a list of beams, each of which is discretized into beamlets (pixels) according to a user-defined resolution. Only beamlets intersecting with the planning target volume (PTV) are active. The framework calculates the beamlet-wise dose distribution within the phantom and returns it as a sparse matrix aligned with the phantom's geometry.
+Additionally, users can access two optional modules:
 
-    Dose calculation employs the Collapsed-Cone Convolution/Superposition (CCCS) method \[[3](http://dx.doi.org/10.1118/1.596360)\] with an exponential kernel. The dose for all active beamlets within a single beam is collectively computed on a grid aligned with the beamlet's eye view (BEV). This grid is translated to the phantom's geometry using interpolation with CUDA's native texture memory functionality. The interpolated dose is then converted into a sparse matrix using the cuSPARSE library.
+4. A point dose kernel generation module, which produces analytical kernels used in the CCCS algorithm.
+5. A slab phantom dose calculation module, which calculates the dose distribution for a user-defined phantom, serving as a benchmark against the CCCS-calculated dose.
 
-* Optimization: This step aims to select an optimal set of beams from a list of candidate beams specified by the user. The fluence maps of the selected beams are then optimized to yield the final dose distribution. The loss function for beam selection consists of three terms:
-    $$
-    \begin{align*}
-    & L = L_1 + L_2 + L_3, \\
-    & L_1 = \frac{\mu}{2} \|\left(A_0x-d_{\text{min}}\right)_-\|_2^2 + \sum_{i=0}^{N_{\text{OAR}}} \|\left(A_ix - d_{\text{max}}^{(i)}\right)_+\|_2^2 + \sum_{i=1}^{N_{\text{OAR}}} \|A_i x\|_2^2, \\
-    & L_2 = \frac{1}{2\gamma} \left\|\text{prox}_{\gamma\|\cdot\|_1}(Dx) - Dx\right\|_2^2, \\
-    & L_3 = \sum_{i=1}^{N_{\text{beam}}}w_b\|x_b\|_2^\frac{1}{2}.
-    \end{align*}
-    $$
-    In the equations above
-    * $x = [x_1^T, x_2^T, ... x_{N_{\text{beam}}}^T]^T$ is the weights of the active beamlets in all beams.
-    * $A = [A_0^T, A_1^T, A_2^T, ... A_{N_{\text{OAR}}}^T]^T$ is the dose loading matrix.
-    * $d_\text{min}$, $d_{\text{max}}$ are the minimum and maximum doses requirements.
-    * $\|a\|_m^n = \left( \sum_{i=1}^N a_i^m \right)^{n/m}$.
-    * $\text{prox}_{f}(x) = \argmin_{u\in \text{dom}f} f(u) + \frac12 \|u-x\|_2^2$.
-
-    $L_1$ enforces the resulting dose to conform to the target distribution, ensuring the PTV dose exceeds the minimum value, the overall dose stays below the maximum value, and penalizing the dose to organs at risk (OARs).
-
-    $L_2$ promotes fluence map smoothness to ensure field deliverability.
-
-    $L_3$ encourages beam sparsity, aiming to select as few beams as possible.
-
-## Installation
-This work is developed on Ubuntu 20.04.4, utilizing an AMD EPYC 7542 32-core processor and 4 NVIDIA RTX A6000 GPUs. The following dependencies are required:
-* CMake (tested on version 3.16.3)
-* gcc (tested on version 9.4.0)
-* nvcc (tested on version 12.2)
-* Boost
-* HDF5
-* Eigen3
-* OpenMP
-* DCMTK
-* Geant4 (optional)
-
-The Geant4 library is used to generate exponential kernel parameters for CCCS and for dose accuracy verification. Users can utilize the provided spectrum `/data/FastDose/scripts/spec_6mv.spec` and kernel `/data/FastDose/scripts/kernel_exp_6mv.txt`. To disable Geant4 modules, please comment the lines `add_subdirectory(boxScore)` and `add_subdirectory(kernelGen)` in `/data/FastDose/CMakeLists.txt`. To install:
+## Quick Start
+### Build the Docker Image
+Assuming the project root is located at `user@workstation:/home/user/FastDose$`, you can build the Docker image by running:
 ```
-~$ cd /data/FastDose
-/data/FastDose$ mkdir build
-/data/FastDose$ cd build
-/data/FastDose/build$ cmake ..
-/data/FastDose/build$ make
+user@workstation:/home/user/FastDose$ bash ./dockerBuild.sh
 ```
+Docker typically requires sudo privileges. If you are able to bypass this, simply remove sudo from the bash script. The Dockerfile installs all dependencies by default, but if you don’t need modules 4 and 5 (which require Geant4), you can:
+1. Comment out lines 20–48 in `./Dockerfile` (Geant4 installation).
+2. Comment out lines 15–16 in `./CMakeLists.txt` to skip compiling modules 4 and 5.
 
-## Running instructions
-An example case is provided [here](https://zenodo.org/records/10810993). Before running, please modify the parameters in the bash scripts accordingly. For a detailed explanation of parameters, use the following commands:
+### Download the Example Dataset
+Download and extract the [dataset](https://zenodo.org/records/13800135) to a folder, e.g., `/data/user/dockerExample`. The dataset includes two cases: a pancreas cancer case and a head-and-neck cancer case. Input files for each case are:
+1. `InputMask` — folder with linearized binary masks in `uint8`.
+2. `structures.json` — lists relevant structures for dose calculation and optimization. Structures in `InputMask` not listed here will be ignored during preprocessing.
+3. `density_raw.bin` — linearized density array in `uint16`.
+4. `kernel_exp_6mv.txt` and `spec_6mv.spec` — parameters for the analytical CCCS kernel and the X-ray spectrum for a 6 MV beam.
+5. `params.txt` and `StructureInfo.csv` — optimization parameters. In `params.txt`, `beamWeight` controls beam sparsity, with higher values reducing valid beams faster but risking early exclusions. `gamma` and `eta` affect the fluence map smoothness.
+
+### Preprocessing
+Using the head-and-neck case as an example, set the `SOURCE_FOLDER` environment variable and run:
 ```
-/data/FastDose$ ./build/bin/preprocess --help
-/data/FastDose$ ./build/bin/IMRT --help
+user@workstation:/home/user/FastDose$ bash ./dockerScripts/HeadNeck/preprocess.sh
 ```
-* Preprocessing
-    ```
-    /data/FastDose$ bash ./scripts/PreProcess.sh
-    ```
-    It generates the isotropic density volume, associated anatomy mask, and metadata in the folder specified in the argument `inputFolder`.
-* Dose calculation
+The `--mount` command maps the host directory `${SOURCE_FOLDER}` to `/data` inside the Docker container. To give the container write permissions, you can set permissions on the folder beforehand:
+```
+user@workstation:/home/user/FastDose$ chmod -R 777 [SOURCE_FOLDER]
+```
+Modify `[SOURCE_FOLDER]` with the full path. Arguments like `--ptv_name` and `__bbox_name` ensure that the structures are correctly contained in the input but do not directly affect results. Output files will be generated in `${INPUT_FOLDER}`.
 
-    Specify the argument `mode` as 0
-    ```
-    /data/FastDose$ bash ./scripts/imrtOpt.sh
-    ```
-    Here we explain the parameters `subFluenceDim` and `subFluenceDimOn`. In the dose calculation, each beamlet is further discretized, rather than using a single pixel to represent the beamlet. Assume we have `subFluenceDim` = 16, `subFluenceDimOn` = 4, and `beamletSize` = 0.5. Then the beamlet can be viewed as a 16-by-16 square of with resolution 0.125cm, and its central 4-by-4 square is on.
+To generate the beam list and directions for dose calculation, edit the Python file `/home/user/FastDose/dockerScripts/HeadNeck/scripts.py`. Uncomment the function `validAngleListGen()` and comment out the others. Modify the `sourceFolder` variable to point to the correct directory. Adjust the `numBeamsDesired` variable for more or fewer candidate beams (note that the final number of valid beams may differ slightly).
 
-    It generates the data of the dose matrix, and stored in the subdirectory `doseMatFolder` of the folder specified in the argument `outputFolder`. The dose matrix is stored in compressed sparse row (CSR) format.
-* Optimization
-    
-    Specify the argument `mode` to as 1
-    ```
-    /data/FastDose$ bash ./scripts/imrtOpt.sh
-    ```
-    It reads the dose generated, select the optimal beams, and polish the fluence map according to the parameters specified in the files specified by arguments `StructureInfo` and `params`. In `params` file, the entry `ChangeWeightsTrigger` is the number of iterations between increasing the `beamWeight` to ensure that `beamWeight` is big enough to penalize excessive beams. `pruneTrigger` is a list of iteration numbers at which to exclude the inactive beams from the dose loading matrix for computation efficiency.
+### Dose Calculation
+After setting `${SOURCE_FOLDER}`, run:
+```
+user@workstation:/home/user/FastDose$ bash ./dockerScripts/HeadNeck/dosecalc.sh
+```
+For head-and-neck cases, we use a multi-isocenter treatment planning with four isocenters, requiring four iterations for dose calculation. Each computes the dose loading matrix for the beams associated with one isocenter. The `--primaryROI PTVSeg${segment}` argument specifies the PTV. For each beam, dose is only calculated for those beamlets which intersect with the PTV. The `--bbox_roi "SKIN"` argument specifies the bounding box of the valid region, beyond which either the density and the dose are ignored. `--deviceIdx` determines the GPU used for computation. Use `--mode 0` for dose calculation and `--mode 1` for treatment optimization.
 
-Please be aware that all matrices, including the density, optimized fluence map, and dose distribution, are stored in column-major order. Please take into consideration the layout disparities between different programming languages, such as MATLAB and Python.
+### Treatment Plan Optimization
+To Optimize the treatment plan, modify `${SOURCE_FOLDER}` and run:
+```
+user@workstation:/home/user/FastDose$ bash ./dockerScript/HeadNeck/optimize.sh
+```
+The program takes the four dose loading matrices (specified with `--outputFolder`) and saves the resulting plan to `${planFolder}`.
 
-## Validation
-Dose calculation accuracy is benchmarked against Geant4-based Monte Carlo simulation on a slab phantom, achieving passing rates of 91.26% and 95.15% at beamlet widths of 0.64cm and 1.28cm, respectively, under a gamma passing criterion of 3%/3mm. Refer to the figure below for plots.
-<img src="./figures/validation.png" alt="Slab dose accuracy validation" width="500" />
+### Postprocessing and Visualization
+In `/home/user/FastDose/dockerScripts/HeadNeck/scripts.py`, the functions `nrrdVerification()`, `DVHplot()`, and `doseWashPlot()` generate the beam view visualization file, dose volume histogram, and dose wash plot, respectively. The `.nrrd` file created by `nrrdVerification()` can be imported into [3D Slicer](https://www.slicer.org/) for visualization.
 
-## Extension
-Within the `scripts` folder, two scripts, namely `doseDataInit.m` and `readDose.m`, are provided to facilitate users in reading the dose loading matrix and anatomy segmentation masks.
+### Additional Information
+For users interested in treatment optimization or developing novel algorithms, you can refer to `/home/user/FastDose/scripts/readDose.m` to load dose matrices into MATLAB.

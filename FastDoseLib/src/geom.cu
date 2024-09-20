@@ -71,7 +71,7 @@ void fd::test_rotateAroundAxisAtOrigin() {
 
     // case 2
     p = float3{3, 0, 0};
-    float r_component = sqrtf32(1. / 3);
+    float r_component = sqrtf32(1.f / 3);
     r = float3{r_component, r_component, r_component};
     t = CUDART_PI_F * 2 / 3;
     result = rotateAroundAxisAtOriginRHS(p, r, t);

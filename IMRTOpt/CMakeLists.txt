@@ -7,7 +7,6 @@ target_link_libraries(IMRT PRIVATE cusparse)
 target_link_libraries(IMRT PRIVATE cublas)
 target_include_directories(IMRT PRIVATE ./include)
 
-find_package(CUDA REQUIRED)
 target_include_directories(IMRT PRIVATE ${CUDA_INCLUDE_DIRS})
 
 set_target_properties(IMRT
